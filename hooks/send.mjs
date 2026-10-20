@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+// Claude Code hook: forwards the stdin JSON payload to the agent-office server.
+// Prints NOTHING (hook stdout can be injected into Claude's context) and always exits 0.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const PORT = Number(process.env.AGENT_OFFICE_PORT || 17777);
+const DEBUG = process.env.AGENT_OFFICE_DEBUG === '1';
+
+function log(msg) {
+  if (!DEBUG) return;
+  try {
+    const dir = process.env.AGENT_OFFICE_DATA || path.join(os.homedir(), '.agent-office');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'hook.log'), `${new Date().toISOString()} ${msg}\n`);
+  } catch { /* ignore */ }
+}
+
+const clip = (v, n) => (typeof v === 'string' && v.length > n ? v.slice(0, n) + '…' : v);
+
+function shrink(ev) {
+  if (ev.tool_response !== undefined) {
+    const r = ev.tool_response;
+    let text = '';
+    if (typeof r === 'string') text = r;
+    else if (r && typeof r === 'object') text = typeof r.stdout === 'string' ? r.stdout + (r.stderr ? '\n' + r.stderr : '') : (JSON.stringify(r) || '');
+    ev.tool_response_len = text.length;
+    ev.tool_response_head = text.slice(0, 400);
+    delete ev.tool_response;
+  }
+  for (const k of ['prompt', 'last_assistant_message', 'message', 'error', 'compact_summary', 'custom_instructions']) {
+    if (typeof ev[k] === 'string') ev[k] = clip(ev[k], 2000);
+  }
+  if (ev.tool_input && typeof ev.tool_input === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(ev.tool_input)) {
+      if (typeof v === 'string') out[k] = clip(v, 500);
+      else if (typeof v === 'number' || typeof v === 'boolean' || v === null) out[k] = v;
+    }
+    ev.tool_input = out;
+  }
+  for (const k of ['background_tasks', 'session_crons', 'permission_suggestions']) delete ev[k];
+  return ev;
+}
+
+async function main() {
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  let ev;
+  try { ev = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { log('bad json'); return; }
+  if (!ev || typeof ev !== 'object') return;
+  shrink(ev);
+  try {
+    await fetch(`http://127.0.0.1:${PORT}/hook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(ev),
+      signal: AbortSignal.timeout(1000),
+    });
+    log(`sent ${ev.hook_event_name} ${ev.tool_name || ''}`);
+  } catch (e) {
+    log(`send failed: ${e.message}`);
+  }
+}
+
+main().catch(() => {}).finally(() => process.exit(0));

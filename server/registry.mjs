@@ -1,0 +1,59 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { SESSIONS_DIR, PROJECTS_DIR, STALE_TOOL_MS } from './config.mjs';
+import { isPidAlive, safeJsonParse, projectDirName } from './util.mjs';
+import { isBusyState } from './store.mjs';
+
+/**
+ * Poll ~/.claude/sessions/<pid>.json. Creates sessions that hooks never reported
+ * (started before hooks were installed), fills pid/name/cwd, and marks sessions
+ * whose process is gone as off-duty. Only *.json is read; *.key files are never opened.
+ */
+export function pollRegistry(store) {
+  let files;
+  try { files = fs.readdirSync(SESSIONS_DIR); } catch { return; }
+  const live = new Map();
+  for (const f of files) {
+    if (!f.endsWith('.json')) continue;
+    const d = safeJsonParse(readSafe(path.join(SESSIONS_DIR, f)));
+    if (!d || !d.sessionId || !d.pid) continue;
+    if (!isPidAlive(d.pid)) continue;
+    live.set(String(d.sessionId), d);
+  }
+
+  const now = Date.now();
+  for (const [id, d] of live) {
+    const existed = store.sessions.get(id);
+    const wasEnded = existed?.ended;
+    const s = store.getOrCreateSession(id, { cwd: d.cwd, name: d.name, startedAt: d.startedAt, pid: d.pid });
+    let changed = !existed || wasEnded;
+    if (s.pid !== d.pid) { s.pid = d.pid; changed = true; }
+    if (d.name && s.name !== d.name) { s.name = d.name; s.nameSource = 'registry'; changed = true; }
+    if (d.cwd && s.cwd !== d.cwd) { s.cwd = d.cwd; changed = true; }
+    if (d.startedAt && d.startedAt < s.startedAt) { s.startedAt = d.startedAt; changed = true; }
+    if (!s.transcriptPath && d.cwd) {
+      s.transcriptPath = path.join(PROJECTS_DIR, projectDirName(d.cwd), `${id}.jsonl`);
+    }
+    if (s.hookEvents === 0) {
+      const want = d.status === 'busy' ? 'working' : 'idle';
+      if (s.state !== want) { store.setState(s, want); changed = true; }
+    } else if (d.status === 'idle' && isBusyState(s.state) && now - s.stateSince > STALE_TOOL_MS) {
+      store.setState(s, 'idle');
+      s.currentTool = null;
+      changed = true;
+    }
+    if (changed) store.emitSession(s);
+  }
+
+  for (const s of store.sessions.values()) {
+    if (s.ended || !s.pid) continue;
+    if (!live.has(s.id) && !isPidAlive(s.pid)) {
+      store.endSession(s, 'process exited');
+      store.emitSession(s);
+    }
+  }
+}
+
+function readSafe(file) {
+  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+}

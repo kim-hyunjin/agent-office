@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Office</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%233b3f5c'/><rect x='3' y='8' width='10' height='5' fill='%23a0714f'/><rect x='5' y='3' width='6' height='4' fill='%232b6cff'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="stage">
+  <canvas id="office" width="512" height="320"></canvas>
+</main>
+<div id="tip" hidden></div>
+<div id="ticker"><ul id="ticker-list"></ul></div>
+<aside id="panel" hidden>
+  <header>
+    <div class="hd">
+      <h2 id="p-name"></h2>
+      <span id="p-state" class="badge"></span>
+    </div>
+    <p id="p-title"></p>
+    <button id="p-close" title="닫기 (Esc)">×</button>
+  </header>
+  <div id="p-scroll">
+    <dl id="p-meta"></dl>
+    <blockquote id="p-prompt" class="prompt" hidden></blockquote>
+    <p id="p-thinking" class="thinking" hidden></p>
+    <div id="p-agents" hidden></div>
+    <blockquote id="p-last" hidden></blockquote>
+    <div id="p-files"></div>
+    <h3>활동 로그</h3>
+    <ul id="p-log"></ul>
+  </div>
+</aside>
+<script type="module" src="office.js"></script>
+</body>
+</html>
