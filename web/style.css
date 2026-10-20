@@ -63,7 +63,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #p-log li.err .result { color: #fca5a5; }
 #p-log .result small { color: var(--dim); }
 
-#ticker { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(20,22,40,0.92); border-top: 1px solid #2f3352; padding: 4px 12px; font-size: 12.5px; height: 118px; overflow: hidden; }
+#ticker { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(20,22,40,0.92); border-top: 1px solid #2f3352; padding: 4px 12px; font-size: 12.5px; height: 118px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #3a3f66 transparent; }
 #ticker ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
 #ticker li { display: grid; grid-template-columns: 62px 150px 20px 1fr; gap: 8px; align-items: baseline; white-space: nowrap; overflow: hidden; line-height: 1.45; }
 #ticker li.new { animation: tick-in .35s ease-out; }

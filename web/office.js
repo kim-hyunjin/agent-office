@@ -176,6 +176,7 @@ function fade(e, now) {
 
 // ---- activity ticker (all sessions) ---------------------------------------------
 const FEED_EVENTS = new Set(['PreToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'SessionStart', 'SessionEnd']);
+const FEED_MAX = 500;
 const feed = { seen: new Set(), items: [] };
 function feedFrom(s) {
   let added = false;
@@ -189,10 +190,13 @@ function feedFrom(s) {
   }
   if (!added) return;
   feed.items.sort((a, b) => b.t - a.t);
-  feed.items.length = Math.min(feed.items.length, 8);
+  feed.items.length = Math.min(feed.items.length, FEED_MAX);
   const ul = document.getElementById('ticker-list');
+  const box = ul.parentElement;
+  // keep the viewport anchored when the user has scrolled back into history
+  const prevTop = box.scrollTop, prevH = box.scrollHeight;
   const newest = feed.items[0]?.key;
-  ul.innerHTML = feed.items.slice(0, 6).map((it) => {
+  ul.innerHTML = feed.items.map((it) => {
     const e = it.e;
     const icon = e.tool ? (ICON[e.tool] || '🔧') : (EV_ICON[e.ev] || '•');
     let what;
@@ -203,6 +207,7 @@ function feedFrom(s) {
     const who = it.agent ? `${esc(it.name)} 🧢` : esc(it.name);
     return `<li class="${it.key === newest ? 'new' : ''}"><time>${fmtTime(e.t)}</time><span class="who ${it.agent ? 'agent' : ''}">${who}</span><span class="ic">${icon}</span><span class="what">${what}</span></li>`;
   }).join('');
+  if (prevTop > 0) box.scrollTop = prevTop + (box.scrollHeight - prevH);
 }
 
 function upsertSession(s, seated = false) {
