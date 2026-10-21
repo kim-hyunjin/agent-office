@@ -108,6 +108,8 @@ export class Store {
       turnTools: 0,
       cost: null,          // { usd, linesAdded, linesRemoved, apiMs } from transcript
       pendingAgents: [],   // Agent tool calls waiting for their SubagentStart
+      bgTasks: [],         // background work the idle session waits on, as of its last Stop
+      awaitingShell: false, // registry status 'shell' (covers sessions without our hooks)
       startedAt: init.startedAt || now,
       lastEventAt: now,
       hookEvents: 0,
@@ -233,7 +235,7 @@ export class Store {
       lastText: s.lastText, lastTextAt: s.lastTextAt, lastPrompt: s.lastPrompt,
       lastThinking: s.lastThinking, lastThinkingAt: s.lastThinkingAt, turnStartedAt: s.turnStartedAt, turnTools: s.turnTools, cost: s.cost,
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, ended: s.ended, endedAt: s.endedAt,
-      desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal,
+      desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
       subagents: [...s.subagents.values()].map((a) => this.serializeSubagent(a)),
       log: s.log.last(logCount),
     };

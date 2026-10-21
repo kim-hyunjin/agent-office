@@ -34,6 +34,9 @@ export function pollRegistry(store) {
     if (!s.transcriptPath && d.cwd) {
       s.transcriptPath = path.join(PROJECTS_DIR, projectDirName(d.cwd), `${id}.jsonl`);
     }
+    // 'shell': the turn ended but a background shell will wake it. Works without our hooks too.
+    const awaitingShell = d.status === 'shell';
+    if (s.awaitingShell !== awaitingShell) { s.awaitingShell = awaitingShell; changed = true; }
     if (s.hookEvents === 0) {
       const want = d.status === 'busy' ? 'working' : 'idle';
       if (s.state !== want) { store.setState(s, want); changed = true; }

@@ -53,7 +53,7 @@ function apply(store, ev) {
     }
     case 'UserPromptSubmit': {
       const prompt = cleanText(ev.prompt || '', 400);
-      if (!agent) { store.setState(s, 'thinking'); s.lastPrompt = prompt; s.turnStartedAt = now; s.turnTools = 0; }
+      if (!agent) { store.setState(s, 'thinking'); s.bgTasks = []; s.lastPrompt = prompt; s.turnStartedAt = now; s.turnTools = 0; }
       if (ev.session_title) s.title = oneLine(ev.session_title);
       store.log(s, { ev: name, text: prompt });
       break;
@@ -102,6 +102,9 @@ function apply(store, ev) {
       const text = cleanText(ev.last_assistant_message || '', 280);
       ent.currentTool = null;
       store.setState(ent, 'idle');
+      if (!agent && Array.isArray(ev.background_tasks)) s.bgTasks = ev.background_tasks.map((t) => ({
+        type: String(t.type || ''), description: oneLine(t.description || ''), command: oneLine(t.command || ''),
+      }));
       if (text) { ent.lastText = text; ent.lastTextAt = now; ent.replyText = replyText(ev.last_assistant_message); }
       store.log(s, { ev: name, text: who + truncate(text, 200) });
       break;

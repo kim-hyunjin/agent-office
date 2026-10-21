@@ -42,7 +42,13 @@ function shrink(ev) {
     }
     ev.tool_input = out;
   }
-  for (const k of ['background_tasks', 'session_crons', 'permission_suggestions']) delete ev[k];
+  // Stop lists in-flight background work (shells, monitors…): "paused waiting for it", not "done".
+  if (Array.isArray(ev.background_tasks)) {
+    ev.background_tasks = ev.background_tasks.slice(0, 10).map((t) => ({
+      id: t?.id, type: t?.type, status: t?.status, description: clip(t?.description, 200), command: clip(t?.command, 200),
+    }));
+  } else delete ev.background_tasks;
+  for (const k of ['session_crons', 'permission_suggestions']) delete ev[k];
   return ev;
 }
 

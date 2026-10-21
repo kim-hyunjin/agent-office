@@ -184,6 +184,7 @@ export class Panel {
     const fam = FAMILIES[familyOf(s.model)];
     const tool = s.currentTool
       ? `<b>${esc(s.currentTool.name)}</b>${s.currentTool.target ? ' · ' + esc(s.currentTool.target) : ''} <span class="dim">(${fmtDur(now - s.currentTool.startedAt)})</span>${s.currentTool.detail ? `<div class="detail">${esc(s.currentTool.detail)}</div>` : ''}`
+      : awaitingBg(s) ? `⏳ ${esc(bgSummary(s))}`
       : esc(STATE_LABEL[s.state] || '—');
     const turn = s.turnStartedAt && s.state !== 'idle' ? `툴 ${s.turnTools}회 · ${fmtDur(now - s.turnStartedAt)} 경과` : (s.turnStartedAt ? `마지막 턴: 툴 ${s.turnTools}회` : '—');
     const cost = s.cost ? `$${s.cost.usd.toFixed(2)} · <span class="add">+${s.cost.linesAdded}</span> / <span class="del">−${s.cost.linesRemoved}</span> 줄` : '—';
@@ -264,6 +265,18 @@ export class Panel {
       return `<li class="${cls}"><time>${fmtTime(e.t)}</time><span class="ic">${icon}</span><span class="head">${head}</span>${e.text ? `<span class="txt">${esc(e.text)}</span>` : ''}${detail}${result}</li>`;
     }).join('');
   }
+}
+
+/** Turn ended, but background work (a shell, a monitor…) will wake the session again. */
+export function awaitingBg(s) { return s.state === 'idle' && (s.bgTasks?.length > 0 || !!s.awaitingShell); }
+
+/** "백그라운드 작업 대기 · npm test 외 1개" — what an idle session is waiting on. */
+export function bgSummary(s) {
+  const tasks = s.bgTasks || [];
+  if (!tasks.length) return '백그라운드 셸 결과 대기';
+  const t = tasks[0];
+  const what = t.command || t.description || t.type || '작업';
+  return `백그라운드 작업 대기 · ${what}${tasks.length > 1 ? ` 외 ${tasks.length - 1}개` : ''}`;
 }
 
 export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

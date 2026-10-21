@@ -171,7 +171,7 @@ function drawEntity(g, e, t, selected, hovered) {
   if (!moving) {
     if (state === 'thinking') drawGlyph(g, 'dots', gx, gy, t + e.seed);
     else if (state === 'waiting') drawGlyph(g, 'bang', gx + 2, gy - 3, t);
-    else if (state === 'terminal') drawGlyph(g, 'term', gx - 1, gy - 4, t + e.seed);
+    else if (state === 'terminal' || (state === 'idle' && (data.bgTasks?.length || data.awaitingShell))) drawGlyph(g, 'term', gx - 1, gy - 4, t + e.seed);
     else if (state === 'idle' && !isAsst && stationKind !== 'lounge') drawGlyph(g, 'zzz', gx + 4, gy - 2, t + e.seed);
     else if (state === 'delegating' && stationKind === 'desk' && e.planeTo) {
       const ph = ((t + e.seed) % 1600) / 1600;

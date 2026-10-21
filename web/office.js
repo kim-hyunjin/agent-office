@@ -6,7 +6,7 @@ import { paletteFor, hashStr, familyOf, FAMILIES } from './sprites.js';
 import { step, clamp } from './anim.js';
 import { render, STATE_LABEL, NEW_BTN } from './render.js';
 import { openLauncher } from './launcher.js';
-import { Panel, ICON, EV_ICON, esc, fmtTime } from './panel.js';
+import { Panel, ICON, EV_ICON, esc, fmtTime, awaitingBg, bgSummary } from './panel.js';
 
 const params = new URLSearchParams(location.search);
 const LOUNGE_AFTER_MS = Number(params.get('loungeAfter') || 90) * 1000; // idle this long → lounge
@@ -138,7 +138,8 @@ function sessionStation(s, e, now) {
     if (i >= 0) { world.lounge.release(s.id); return { kind: 'library', ...LIBRARY_SPOTS[i] }; }
   } else world.library.release(s.id);
   const idleFor = s.state === 'idle' ? now - s.stateSince : 0;
-  if (!busyWithSubs && (idleFor > LOUNGE_AFTER_MS || (world.lounge.has(s.id) && s.state === 'idle'))) {
+  // Turn ended but a background shell/monitor will wake it — waiting at the desk, not on a break.
+  if (!busyWithSubs && !awaitingBg(s) && (idleFor > LOUNGE_AFTER_MS || (world.lounge.has(s.id) && s.state === 'idle'))) {
     const i = world.lounge.take(s.id);
     if (i >= 0) return { kind: 'lounge', ...LOUNGE_SPOTS[i] };
   } else world.lounge.release(s.id);
@@ -364,6 +365,7 @@ function describe(e) {
   return `<b>${esc(s.name)}</b>${tier ? ` <span class="st">${tier}</span>` : ''}${where ? ` <span class="dim">· ${where}</span>` : ''}${s.title ? `<br>${esc(s.title)}` : ''}`
     + (s.lastPrompt ? `<div class="task">지시: ${esc(s.lastPrompt)}</div>` : '')
     + `<div>${toolLine(s)}${s.permissionMode ? ` <span class="dim">· ${esc(s.permissionMode)}</span>` : ''}</div>${think(s)}`
+    + (awaitingBg(s) ? `<div class="task">⏳ ${esc(bgSummary(s))}</div>` : '')
     + `<div class="dim">${esc(s.cwd)}${s.model ? ' · ' + esc(s.model) : ''}</div>`;
 }
 
