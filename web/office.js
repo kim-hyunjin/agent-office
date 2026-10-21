@@ -401,14 +401,16 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  // rAF time is page-relative; fadeAt and everything else use wall-clock ms
+  const wall = Date.now();
   for (const e of [...world.ents.values()]) {
     step(e, dt);
     if (e.phase === 'fade') {
-      e.alpha = 1 - (now - e.fadeAt) / 1500;
+      e.alpha = 1 - (wall - e.fadeAt) / 1500;
       if (e.alpha <= 0) world.ents.delete(e.key);
     }
   }
-  render(ctx, S, world, Date.now());
+  render(ctx, S, world, wall);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
