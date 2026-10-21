@@ -31,6 +31,7 @@ export class Panel {
     this.drafts = new Map(); // sessionId -> unsent text
     this.input = el.querySelector('#p-input');
     this.composeMsg = el.querySelector('#p-compose-msg');
+    this.sendBtn = el.querySelector('#p-send'); // cached: the composer moves into the reply dialog while it's open
     this.input.addEventListener('keydown', (e) => {
       // isComposing: Enter that commits a Hangul syllable must not send.
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
@@ -97,7 +98,7 @@ export class Panel {
     const id = this.id, text = this.input.value.trim();
     if (!id || !text || this.sending || this.session?.state === 'waiting') return;
     this.sending = true;
-    this.el.querySelector('#p-send').disabled = true;
+    this.sendBtn.disabled = true;
     this.setComposeMsg('보내는 중…');
     try {
       const r = await fetch(`/sessions/${encodeURIComponent(id)}/prompt`, {
@@ -166,7 +167,7 @@ export class Panel {
     this.quitBtn.hidden = !!s.ended;
     const off = !!s.ended, waiting = s.state === 'waiting';
     this.input.disabled = off;
-    this.el.querySelector('#p-send').disabled = off || waiting || !!this.sending;
+    this.sendBtn.disabled = off || waiting || !!this.sending;
     this.input.placeholder = off ? '퇴근한 직원입니다.'
       : waiting ? '권한 승인·질문 응답 대기 중 — 터미널에서 먼저 답해주세요. (써 두고 나중에 보낼 수 있어요)'
       : `이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)${s.orcaTerminal ? '' : '\nOrca 터미널 연결 전 — 보내면 자동으로 찾아봅니다.'}`;

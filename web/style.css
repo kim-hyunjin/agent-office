@@ -144,6 +144,8 @@ button:disabled { opacity: .5; cursor: default; }
 #reply header button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 0; cursor: pointer; background: var(--panel-2); color: var(--text); }
 #reply #r-close { font-size: 18px; padding: 0 10px; line-height: 28px; }
 #r-body { flex: 1; overflow: auto; padding: 18px 26px 28px; }
+#reply #p-compose { flex: none; padding: 10px 16px 14px 22px; }
+#reply #p-input { max-height: 30vh; }
 
 .md { font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; font-size: 14.5px; line-height: 1.7; color: var(--text); word-break: keep-all; overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }

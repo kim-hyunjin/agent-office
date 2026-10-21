@@ -9,11 +9,17 @@ const metaEl = document.getElementById('r-meta');
 const body = document.getElementById('r-body');
 const copyBtn = document.getElementById('r-copy');
 
+const compose = document.getElementById('p-compose');
+const composeHome = compose.parentNode, composeNext = compose.nextSibling;
+
 let cur = null; // { id, at, text }
 
 document.getElementById('r-close').addEventListener('click', () => dlg.close());
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
-dlg.addEventListener('close', () => { cur = null; });
+dlg.addEventListener('close', () => {
+  cur = null;
+  composeHome.insertBefore(compose, composeNext); // hand the composer back to the panel
+});
 copyBtn.addEventListener('click', async () => {
   if (!cur) return;
   try { await navigator.clipboard.writeText(cur.text); copyBtn.textContent = '복사됨 ✓'; }
@@ -26,6 +32,8 @@ export function openReply(s) {
   nameEl.textContent = s.name;
   metaEl.textContent = '';
   body.innerHTML = '';
+  // Borrow the panel's composer (same input, draft and send state) so instructions can go out from here.
+  dlg.append(compose);
   if (!dlg.open) dlg.showModal();
   load(s);
 }
