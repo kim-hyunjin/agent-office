@@ -1,4 +1,4 @@
-# Agent Office
+# Pawgents Office
 
 Claude Code 세션들이 일하는 모습을 **픽셀아트 사무실**로 보여주는 로컬 웹 UI입니다.
 
@@ -11,8 +11,28 @@ Claude Code 세션들이 일하는 모습을 **픽셀아트 사무실**로 보�
 
 ## 사용법
 
+### Claude Code 플러그인으로 (권장)
+
+```
+/plugin marketplace add kim-hyunjin/pawgents-office
+/plugin install pawgents-office@pawgents-office
+```
+
+설치 후 새로 띄우는 `claude` 세션부터 훅이 자동으로 걸리고, 세션이 시작될 때 서버가 꺼져 있으면 백그라운드로 띄웁니다(로그: `~/.pawgents-office/server.log`). settings.json은 건드리지 않습니다.
+
+| 명령 | 동작 |
+|---|---|
+| `/pawgents-office:open` | 서버를 (꺼져 있으면) 띄우고 브라우저로 http://127.0.0.1:17777 을 엽니다 |
+| `/pawgents-office:stop` | 백그라운드 서버를 끕니다 |
+
+자동 시작이 싫으면 `PAWGENTS_OFFICE_AUTOSTART=0`을 설정하고 `pnpm start`로 직접 띄우세요.
+예전에 `pnpm install-hooks`로 훅을 설치했다면 이벤트가 두 번 들어가니 `pnpm uninstall-hooks`로 먼저 지우세요.
+로컬 클론을 그대로 쓰려면 `/plugin marketplace add ~/pawgents-office` 처럼 경로를 넣으면 됩니다.
+
+### 직접 실행
+
 ```bash
-cd ~/agent-office
+cd ~/pawgents-office
 pnpm install-hooks     # 최초 1회: ~/.claude/settings.json에 hook 등록 (자동 백업)
 pnpm start             # http://127.0.0.1:17777
 claude                 # 아무 터미널, 아무 레포에서 평소처럼 사용
@@ -34,7 +54,7 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 | transcript (`~/.claude/projects/.../<session>.jsonl`) | 세션 제목, 모델, 최근 답변 텍스트(말풍선). 상태는 바꾸지 않습니다. |
 
 서버(`server/`)는 `POST /hook`으로 이벤트를 받아 상태를 갱신하고 `GET /events`(SSE)로 브라우저에 밀어줍니다.
-책상 배정은 `~/.agent-office/state.json`에 기억되어 서버를 재시작해도 같은 세션은 같은 자리에 앉습니다.
+책상 배정은 `~/.pawgents-office/state.json`에 기억되어 서버를 재시작해도 같은 세션은 같은 자리에 앉습니다.
 
 ## 사무실 구조와 행동
 
@@ -125,18 +145,18 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 
 | 환경변수 | 기본값 | 설명 |
 |---|---|---|
-| `AGENT_OFFICE_PORT` | `17777` | 서버 포트. 훅 스크립트도 같은 변수를 읽습니다. |
-| `AGENT_OFFICE_DATA` | `~/.agent-office` | 책상 배정 저장 위치 |
-| `AGENT_OFFICE_DEBUG` | | `1`이면 훅 스크립트가 `~/.agent-office/hook.log`에 기록 |
+| `PAWGENTS_OFFICE_PORT` | `17777` | 서버 포트. 훅 스크립트도 같은 변수를 읽습니다. |
+| `PAWGENTS_OFFICE_DATA` | `~/.pawgents-office` | 책상 배정 저장 위치 |
+| `PAWGENTS_OFFICE_DEBUG` | | `1`이면 훅 스크립트가 `~/.pawgents-office/hook.log`에 기록 |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 설정 디렉터리를 옮긴 경우 |
-| `AGENT_OFFICE_ORCA_BIN` | `orca.exe` (Windows) / `orca` (macOS) / `orca-ide` (Linux) | Orca CLI 실행 파일. `ORCA_CLI_COMMAND`가 있으면 그 값을 씁니다. |
+| `PAWGENTS_OFFICE_ORCA_BIN` | `orca.exe` (Windows) / `orca` (macOS) / `orca-ide` (Linux) | Orca CLI 실행 파일. `ORCA_CLI_COMMAND`가 있으면 그 값을 씁니다. |
 
 ## 트러블슈팅
 
-- **직원이 안 나타남**: `pnpm install-hooks`를 실행했는지, 서버가 떠 있는지 확인. 이미 떠 있던 `claude`는 재시작해야 툴 상세가 보입니다(존재 여부는 레지스트리로 바로 보임).
-- **훅이 도는지 확인**: `AGENT_OFFICE_DEBUG=1 claude` 로 실행한 뒤 `~/.agent-office/hook.log`를 보거나, `claude --debug hooks`.
+- **직원이 안 나타남**: 플러그인이 켜져 있는지(`/plugin`) 또는 `pnpm install-hooks`를 실행했는지, 서버가 떠 있는지 확인. 이미 떠 있던 `claude`는 재시작해야 툴 상세가 보입니다(존재 여부는 레지스트리로 바로 보임).
+- **훅이 도는지 확인**: `PAWGENTS_OFFICE_DEBUG=1 claude` 로 실행한 뒤 `~/.pawgents-office/hook.log`를 보거나, `claude --debug hooks`.
 - **서버 로그**: 서버 터미널에 `[hook] PreToolUse Edit · office.js  <세션> → coding` 식으로 찍힙니다.
-- **포트 충돌**: `AGENT_OFFICE_PORT=18000 pnpm start` 처럼 바꾸고, 훅도 같은 변수를 보도록 쉘 환경에 export 하세요.
+- **포트 충돌**: `PAWGENTS_OFFICE_PORT=18000 pnpm start` 처럼 바꾸고, 훅도 같은 변수를 보도록 쉘 환경에 export 하세요.
 
 ## 구조
 
@@ -144,6 +164,8 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 server/   index.mjs(HTTP/SSE) · reducer.mjs(이벤트→상태) · store.mjs(모델/책상/영속화)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
 web/      office.js(진입점) · render.js · sprites.js · tilemap.js · panel.js · launcher.js(새 직원)
-hooks/    send.mjs(훅 본체) · install.mjs · uninstall.mjs
-scripts/  demo.mjs(가짜 이벤트 재생)
+hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs
+scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
+commands/ open.md · stop.md (플러그인 슬래시 명령)
+.claude-plugin/  plugin.json · marketplace.json
 ```

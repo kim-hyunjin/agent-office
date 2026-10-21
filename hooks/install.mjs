@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Registers agent-office hooks in ~/.claude/settings.json. Idempotent; backs up first.
+// Registers pawgents-office hooks in ~/.claude/settings.json. Idempotent; backs up first.
 //   node hooks/install.mjs [--dry-run]
 import { EVENTS, HOOK_COMMAND, SETTINGS_FILE, isOurs, readSettings, backupSettings, writeSettings } from './_common.mjs';
 
@@ -24,7 +24,7 @@ for (const event of EVENTS) {
 }
 
 if (!added.length) {
-  console.log(`agent-office hooks already installed in ${SETTINGS_FILE} — no changes.`);
+  console.log(`pawgents-office hooks already installed in ${SETTINGS_FILE} — no changes.`);
   process.exit(0);
 }
 if (dryRun) {
@@ -34,7 +34,7 @@ if (dryRun) {
 }
 const bak = backupSettings();
 writeSettings(settings);
-console.log(`Installed agent-office hooks for ${added.length} events: ${added.join(', ')}`);
+console.log(`Installed pawgents-office hooks for ${added.length} events: ${added.join(', ')}`);
 console.log(`  command: ${HOOK_COMMAND}`);
 if (bak) console.log(`  backup:  ${bak}`);
 console.log('\nNote: claude sessions that are already running keep their old hook config until restarted.');

@@ -188,7 +188,7 @@ function drawEntity(g, e, t, selected, hovered) {
 // ---- text -------------------------------------------------------------------------
 function drawSign(ctx, S) {
   ctx.font = `bold ${6.5 * S}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-  ctx.fillStyle = '#2a2d45'; ctx.fillText('AGENT OFFICE', (SIGN.x * TILE + SIGN.w * TILE / 2) * S, 8 * S);
+  ctx.fillStyle = '#2a2d45'; ctx.fillText('PAWGENTS OFFICE', (SIGN.x * TILE + SIGN.w * TILE / 2) * S, 8 * S);
   ctx.textAlign = 'left';
 }
 

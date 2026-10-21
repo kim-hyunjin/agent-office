@@ -1,9 +1,9 @@
 {
-  "name": "agent-office",
+  "name": "pawgents-office",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Watch Claude Code sessions work in a pixel-art office",
+  "description": "Watch Claude Code sessions work as cats in a pixel-art office",
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node server/index.mjs",

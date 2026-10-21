@@ -1,6 +1,7 @@
+import fs from 'node:fs';
 import http from 'node:http';
 import {
-  PORT, HOST, MAX_BODY_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE,
+  PORT, HOST, MAX_BODY_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR,
 } from './config.mjs';
 import { Store } from './store.mjs';
 import { applyHook } from './reducer.mjs';
@@ -166,14 +167,19 @@ const server = http.createServer(async (req, res) => {
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Is another agent-office running? Set AGENT_OFFICE_PORT to change it.`);
+    console.error(`Port ${PORT} is already in use. Is another pawgents-office running? Set PAWGENTS_OFFICE_PORT to change it.`);
     process.exit(1);
   }
   throw e;
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`agent-office  →  http://${HOST}:${PORT}`);
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(PID_FILE, String(process.pid));
+  process.on('exit', () => {
+    try { if (fs.readFileSync(PID_FILE, 'utf8') === String(process.pid)) fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
+  });
+  console.log(`pawgents-office  →  http://${HOST}:${PORT}`);
   console.log(`desk memory: ${STATE_FILE}`);
   console.log(`sessions restored: ${store.sessions.size}`);
 });

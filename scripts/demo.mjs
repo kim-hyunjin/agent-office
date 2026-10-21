@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Replays a fake Claude Code hook sequence against a running agent-office server,
+// Replays a fake Claude Code hook sequence against a running pawgents-office server,
 // so the office can be developed and demoed without a live claude session.
 //   node scripts/demo.mjs [--loop] [--speed 1] [--port 17777]
 const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const LOOP = args.includes('--loop');
 const SPEED = Number(flag('--speed', 1));
-const PORT = Number(flag('--port', process.env.AGENT_OFFICE_PORT || 17777));
+const PORT = Number(flag('--port', process.env.PAWGENTS_OFFICE_PORT || 17777));
 const URL_ = `http://127.0.0.1:${PORT}/hook`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms / SPEED));
@@ -62,7 +62,7 @@ let round = 0;
 do {
   const tag = round ? `-${round}` : '';
   await Promise.all([
-    play(script(`demo-alpha${tag}`, '/home/demo/agent-office', `demo-agent-a${tag}`,
+    play(script(`demo-alpha${tag}`, '/home/demo/pawgents-office', `demo-agent-a${tag}`,
       '말풍선 기능을 추가했습니다. `web/bubble.js`에 CJK 글자 단위 줄바꿈을 넣었고, 테스트 12개가 모두 통과합니다.')),
     (async () => {
       await sleep(5000);

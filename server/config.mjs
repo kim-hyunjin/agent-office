@@ -1,18 +1,19 @@
 import os from 'node:os';
 import path from 'node:path';
 
-export const PORT = Number(process.env.AGENT_OFFICE_PORT || process.env.PORT || 17777);
+export const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || process.env.PORT || 17777);
 export const HOST = '127.0.0.1';
 
 export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 export const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 export const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 
-export const DATA_DIR = process.env.AGENT_OFFICE_DATA || path.join(os.homedir(), '.agent-office');
+export const DATA_DIR = process.env.PAWGENTS_OFFICE_DATA || path.join(os.homedir(), '.pawgents-office');
 export const STATE_FILE = path.join(DATA_DIR, 'state.json');
+export const PID_FILE = path.join(DATA_DIR, 'server.pid'); // written while listening; read by scripts/stop.mjs
 
 // Native launcher, not orca.cmd: cmd.exe would reparse prompt text. On Linux bare `orca` is the screen reader.
-export const ORCA_BIN = process.env.AGENT_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
+export const ORCA_BIN = process.env.PAWGENTS_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
   || (process.platform === 'win32' ? 'orca.exe' : process.platform === 'linux' ? 'orca-ide' : 'orca');
 export const MAX_PROMPT_CHARS = 20_000;
 export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (served on demand, not over SSE)

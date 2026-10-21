@@ -1,0 +1,13 @@
+{
+  "name": "pawgents-office",
+  "owner": {
+    "name": "kim-hyunjin"
+  },
+  "plugins": [
+    {
+      "name": "pawgents-office",
+      "source": "./"
+    }
+  ],
+  "description": "Watch Claude Code sessions work as cats in a pixel-art office"
+}

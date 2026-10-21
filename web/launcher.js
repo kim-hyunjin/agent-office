@@ -8,7 +8,7 @@ const prompt = document.getElementById('l-prompt');
 const msg = document.getElementById('l-msg');
 const submit = document.getElementById('l-submit');
 
-const LAST_KEY = 'agent-office:last-worktree';
+const LAST_KEY = 'pawgents-office:last-worktree';
 const store = {
   get() { try { return localStorage.getItem(LAST_KEY) || ''; } catch { return ''; } },
   set(v) { try { localStorage.setItem(LAST_KEY, v); } catch { /* private mode */ } },

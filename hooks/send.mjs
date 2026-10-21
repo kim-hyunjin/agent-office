@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// Claude Code hook: forwards the stdin JSON payload to the agent-office server.
+// Claude Code hook: forwards the stdin JSON payload to the pawgents-office server.
 // Prints NOTHING (hook stdout can be injected into Claude's context) and always exits 0.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const PORT = Number(process.env.AGENT_OFFICE_PORT || 17777);
-const DEBUG = process.env.AGENT_OFFICE_DEBUG === '1';
+const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || 17777);
+const DEBUG = process.env.PAWGENTS_OFFICE_DEBUG === '1';
 
 function log(msg) {
   if (!DEBUG) return;
   try {
-    const dir = process.env.AGENT_OFFICE_DATA || path.join(os.homedir(), '.agent-office');
+    const dir = process.env.PAWGENTS_OFFICE_DATA || path.join(os.homedir(), '.pawgents-office');
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, 'hook.log'), `${new Date().toISOString()} ${msg}\n`);
   } catch { /* ignore */ }
@@ -46,12 +46,15 @@ function shrink(ev) {
   return ev;
 }
 
-async function main() {
+export async function readEvent() {
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
   let ev;
-  try { ev = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { log('bad json'); return; }
-  if (!ev || typeof ev !== 'object') return;
+  try { ev = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { log('bad json'); return null; }
+  return ev && typeof ev === 'object' ? ev : null;
+}
+
+export async function forward(ev) {
   shrink(ev);
   // Set by Orca in its managed terminals; lets the office type into this session.
   if (process.env.ORCA_TERMINAL_HANDLE) ev.orca_terminal = process.env.ORCA_TERMINAL_HANDLE;
@@ -68,4 +71,6 @@ async function main() {
   }
 }
 
-main().catch(() => {}).finally(() => process.exit(0));
+if (import.meta.main) {
+  readEvent().then((ev) => ev && forward(ev)).catch(() => {}).finally(() => process.exit(0));
+}
