@@ -20,7 +20,7 @@ export const isBusyState = (s) => BUSY_STATES.has(s);
 export class Store {
   constructor({ stateFile = STATE_FILE } = {}) {
     this.sessions = new Map();
-    this.desks = {};           // sessionId -> { desk, at }
+    this.desks = {};           // sessionId -> { desk, at, terminal? }
     this.stateFile = stateFile;
     this.listeners = new Set();
     this.save = debounce(() => this.saveNow(), 500);
@@ -61,9 +61,16 @@ export class Store {
     let desk;
     if (remembered && !used.has(remembered.desk)) desk = remembered.desk;
     else { desk = 0; while (used.has(desk)) desk++; }
-    this.desks[sessionId] = { desk, at: Date.now() };
+    this.desks[sessionId] = { ...remembered, desk, at: Date.now() };
     this.save();
     return desk;
+  }
+  /** Link a session to its Orca terminal; remembered with the desk so a server restart keeps it. */
+  setTerminal(s, handle) {
+    if (!handle || s.orcaTerminal === handle) return;
+    s.orcaTerminal = handle;
+    const d = this.desks[s.id];
+    if (d) { d.terminal = handle; this.save(); }
   }
   releaseDesk(sessionId) {
     delete this.desks[sessionId];
@@ -118,7 +125,7 @@ export class Store {
       desk: this.assignDesk(id),
       permissionMode: null,
       transcriptPath: init.transcriptPath || null,
-      orcaTerminal: null,  // Orca terminal handle (from hook env) for sending prompts
+      orcaTerminal: this.desks[id]?.terminal || null, // Orca terminal handle (hook env or resolved) for sending prompts
       log: new RingBuffer(LOG_SIZE),
       subagents: new Map(),
     };

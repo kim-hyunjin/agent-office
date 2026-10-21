@@ -19,6 +19,7 @@ export function runOrca(args, { timeoutMs = 15_000 } = {}) {
 }
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+const normTitle = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const within = (dir, root) => { const d = norm(dir), r = norm(root); return !!r && (d === r || d.startsWith(r + '/')); };
 
 export async function listTerminals() {
@@ -43,7 +44,8 @@ export async function listWorktrees() {
 
 /**
  * Find the Orca terminal that runs session `s`. Hook-reported handle wins; otherwise
- * guess from the single live claude terminal whose worktree contains the session cwd.
+ * guess from the single live claude terminal whose worktree contains the session cwd,
+ * breaking a tie by the tab title (Orca shows the claude session title there).
  */
 export async function resolveTerminal(store, s) {
   const terms = await listTerminals();
@@ -56,8 +58,14 @@ export async function resolveTerminal(store, s) {
   const cands = terms.filter((t) => t.agentIdentity === 'claude' && t.connected && t.writable && !claimed.has(t.handle) && within(s.cwd, t.worktreePath));
   const rivals = [...store.sessions.values()].filter((o) => o !== s && !o.ended && !o.orcaTerminal && cands.some((t) => within(o.cwd, t.worktreePath)));
   if (cands.length === 1 && !rivals.length) return cands[0];
+  const title = normTitle(s.title);
+  if (title && cands.length) {
+    const hits = cands.filter((t) => normTitle(t.title) === title);
+    const twin = [...store.sessions.values()].some((o) => o !== s && !o.ended && normTitle(o.title) === title);
+    if (hits.length === 1 && !twin) return hits[0];
+  }
   const e = new Error(cands.length
-    ? `이 세션의 Orca 터미널을 특정할 수 없습니다 (후보 ${cands.length}개). 세션에서 프롬프트를 한 번 보내면 연결됩니다.`
+    ? `이 세션의 Orca 터미널을 특정할 수 없습니다 (같은 worktree의 claude 탭 ${cands.length}개, 제목 일치 없음). 플러그인 설치 후 시작한 세션이면 프롬프트를 한 번 보내면 연결됩니다.`
     : 'Orca 터미널에서 실행 중인 세션이 아닙니다.');
   e.code = 'terminal_not_found';
   throw e;
@@ -68,7 +76,7 @@ export async function sendPrompt(store, s, text) {
   if (t.agentIdentity && t.agentIdentity !== 'claude') {
     const e = new Error(`이 터미널은 claude가 아닌 ${t.agentIdentity}를 실행 중입니다.`); e.code = 'not_claude'; throw e;
   }
-  s.orcaTerminal = t.handle;
+  store.setTerminal(s, t.handle);
   return runOrca(['terminal', 'send', '--terminal', t.handle, '--text', text, '--enter']);
 }
 
@@ -78,7 +86,7 @@ export async function sendPrompt(store, s, text) {
  */
 export async function closeSession(store, s, { force = false } = {}) {
   const t = await resolveTerminal(store, s);
-  s.orcaTerminal = t.handle;
+  store.setTerminal(s, t.handle);
   if (force) { launched.delete(t.handle); return runOrca(['terminal', 'close', '--terminal', t.handle]); }
   const r = await runOrca(['terminal', 'send', '--terminal', t.handle, '--text', '/exit', '--enter']);
   // A tab we opened has nothing left once claude exits; a user's own tab keeps its shell.

@@ -1,6 +1,6 @@
 {
   "name": "pawgents-office",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Watch Claude Code sessions work as cats in a pixel-art office",

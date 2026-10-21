@@ -35,7 +35,7 @@ function apply(store, ev) {
   s.lastEventAt = now;
   if (ev.permission_mode) s.permissionMode = ev.permission_mode;
   if (ev.transcript_path && !s.transcriptPath) s.transcriptPath = ev.transcript_path;
-  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal) s.orcaTerminal = ev.orca_terminal;
+  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal) store.setTerminal(s, ev.orca_terminal);
 
   const agentId = ev.agent_id ? String(ev.agent_id) : null;
   const agent = agentId ? store.getOrCreateSubagent(s, agentId, { type: ev.agent_type }) : null;
