@@ -149,11 +149,12 @@ function drawEntity(g, e, t, selected, hovered) {
   const stationKind = e.phase === 'seated' ? e.station?.kind : null;
   const anim = animFor(state, moving, stationKind);
   const auto = e.kind === 'employee' && AUTO_MODES.has(data.permissionMode);
-  const rate = anim === 'walk' ? 140 : anim === 'type' ? (auto ? 100 : 160) : anim === 'write' ? 500 : 450;
+  const rate = anim === 'walk' ? 90 : anim === 'type' ? (auto ? 100 : 160) : anim === 'write' ? 500 : 450;
   const frame = Math.floor((t + e.seed) / rate);
   const img = sprite(e.pal, anim, frame);
   const isAsst = e.kind === 'assistant';
-  const ox = isAsst ? 5 : 4, oy = (isAsst ? 5 : 2) + (anim === 'sit' ? 1 : 0);
+  // centered on the tile, feet on the shadow line
+  const ox = Math.round((TILE - img.width) / 2), oy = 14 - img.height;
   const bob = !moving && (anim === 'idle' || anim === 'read' || anim === 'sit') && Math.floor((t + e.seed) / 700) % 2 ? 1 : 0;
   g.globalAlpha = e.alpha;
   g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, img.width, 2);
@@ -161,8 +162,10 @@ function drawEntity(g, e, t, selected, hovered) {
     g.fillStyle = selected ? 'rgba(255,209,102,0.55)' : 'rgba(255,255,255,0.35)';
     g.fillRect(e.x + ox - 2, e.y + oy - 2 + bob, img.width + 4, img.height + 4);
   }
-  g.drawImage(img, e.x + ox, e.y + oy + bob);
-  if (anim === 'sit' || stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width - 1, e.y + oy + 6 + bob, t + e.seed);
+  if (anim === 'walk' && e.dir < 0) {
+    g.save(); g.translate(e.x + ox + img.width, e.y + oy); g.scale(-1, 1); g.drawImage(img, 0, 0); g.restore();
+  } else g.drawImage(img, e.x + ox, e.y + oy + bob);
+  if (anim === 'sit' || stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
   // indicators above the head
   const gx = e.x + ox + Math.floor(img.width / 2) - 3, gy = e.y + oy - 4;
   if (!moving) {
@@ -360,7 +363,7 @@ function drawLegend(ctx, S, world) {
   const fams = Object.keys(FAMILIES).filter((f) => present.has(f) && (f !== 'other' || [...world.sessions.values()].some((s) => !s.ended && familyOf(s.model) === 'other')));
   const fs = fpx(4, S);
   ctx.font = `${fs}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  const labelOf = (f) => FAMILIES[f].title ? `${FAMILIES[f].label} ${FAMILIES[f].title}` : FAMILIES[f].label;
+  const labelOf = (f) => [FAMILIES[f].label, FAMILIES[f].title, FAMILIES[f].breed].filter(Boolean).join(' ');
   const itemW = fams.map((f) => 8 * S + 3 * S + ctx.measureText(labelOf(f)).width + 6 * S);
   const totalW = itemW.reduce((a, b) => a + b, 0) + 4 * S;
   const x0 = (W - TILE) * S - totalW - 2 * S, y0 = (H - TILE) * S + 2 * S, h = 12 * S;

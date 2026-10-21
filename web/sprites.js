@@ -1,10 +1,5 @@
 // Programmatic pixel sprites: string art → cached OffscreenCanvas. No image assets.
-
-const BODY = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ff6b9d', '#5dade2', '#c0392b'];
-const HAIR = ['#2b1b0e', '#5a3825', '#d4a017', '#1a1a2e', '#7b241c', '#4a235a', '#616a6b'];
-const SKIN = ['#f1c27d', '#e0ac69', '#ffdbac', '#c68642', '#8d5524'];
-const PANTS = ['#2c3e50', '#34495e', '#1f2a44', '#4b3832'];
-const CAP = ['#ffffff', '#ffd166', '#06d6a0', '#ef476f', '#118ab2'];
+// Everyone is a cat: front-facing and seated when at a station, side-on and running when moving.
 
 export function hashStr(s) {
   let h = 2166136261;
@@ -12,13 +7,55 @@ export function hashStr(s) {
   return h >>> 0;
 }
 
-// Model family → outfit. Higher tier = more senior look. Hair/skin still vary per session.
+// Coat colors. F fur, S markings (ticking / stripes), A ears, T tail, C chest + belly, U muzzle,
+// P paws, N nose, E eyes, R long-hair ruff (only fluffy breeds; transparent otherwise).
+const coat = (F, S, A, T, C, U, P, N, E, R = null) => ({ F, S, A, T, C, U, P, N, E, R });
+
+// Model family → breed, roughly by how often the breed tops "smartest cat" lists
+// (Abyssinian, Siamese first; Russian Blue mid-list; the placid Persian rarely appears).
+// Each breed has a few color variants so sessions of the same family still differ.
 export const FAMILIES = {
-  fable:  { label: 'Fable',  title: '수석', tier: 4, body: ['#5b21b6', '#4c1d95', '#6d28d9'], accessories: ['tie:#ffd166', 'pin:#ffd166'], monitor: 'wide-gold' },
-  opus:   { label: 'Opus',   title: '선임', tier: 3, body: ['#1e3a8a', '#1f2937', '#312e81'], accessories: ['tie:#c0392b', 'glasses:#e8eef5'], monitor: 'silver' },
-  sonnet: { label: 'Sonnet', title: '사원', tier: 2, body: ['#0d9488', '#059669', '#0e7490'], accessories: ['headphones:#1a1a2e'], monitor: 'normal' },
-  haiku:  { label: 'Haiku',  title: '인턴', tier: 1, body: ['#f59e0b', '#f97316', '#fbbf24'], accessories: ['lanyard:#fdfdfd'], monitor: 'laptop' },
-  other:  { label: '기타',   title: '',     tier: 0, body: BODY, accessories: [], monitor: 'normal' },
+  fable: {
+    label: 'Fable', title: '수석', breed: '아비시니안', tier: 4, monitor: 'wide-gold',
+    coats: [
+      coat('#c0703a', '#7a3f1d', '#8a4a24', '#8a4a24', '#e8b98a', '#f0d2b0', '#9a5228', '#c0505a', '#9bc53d'), // ruddy
+      coat('#d1a27a', '#9a6a45', '#a8784f', '#a8784f', '#f1d9bd', '#f6e4cf', '#a8784f', '#c56a72', '#d4a72c'), // fawn
+      coat('#8f8a9a', '#5d5868', '#6f6a7a', '#6f6a7a', '#d8c7b4', '#e6d9cc', '#6f6a7a', '#b8737e', '#d4a72c'), // blue
+    ],
+  },
+  opus: {
+    label: 'Opus', title: '선임', breed: '샴', tier: 3, monitor: 'silver',
+    coats: [
+      coat('#efe3cc', '#efe3cc', '#4a3426', '#4a3426', '#f7efe0', '#4a3426', '#4a3426', '#2a1d16', '#4aa3ff'), // seal point
+      coat('#eceff2', '#eceff2', '#6b7a90', '#6b7a90', '#f7f8fa', '#6b7a90', '#6b7a90', '#4a5568', '#4aa3ff'), // blue point
+      coat('#f6f1ee', '#f6f1ee', '#9a8a96', '#9a8a96', '#fbf8f6', '#9a8a96', '#9a8a96', '#7d6b78', '#6cb8ff'), // lilac point
+    ],
+  },
+  sonnet: {
+    label: 'Sonnet', title: '사원', breed: '러시안블루', tier: 2, monitor: 'normal',
+    coats: [
+      coat('#7d8a9c', '#7d8a9c', '#6c7889', '#7d8a9c', '#8f9bad', '#8f9bad', '#6c7889', '#5b6b80', '#5fd36a'),
+      coat('#6f7c8f', '#6f7c8f', '#5f6b7c', '#6f7c8f', '#818ea1', '#818ea1', '#5f6b7c', '#4f5f74', '#7be07f'),
+    ],
+  },
+  haiku: {
+    label: 'Haiku', title: '인턴', breed: '페르시안', tier: 1, monitor: 'laptop',
+    coats: [
+      coat('#f6f3ee', '#f6f3ee', '#e6ded1', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#f2a0b0', '#e0892c', '#ece6dc'), // white, copper eyes
+      coat('#f1dcb8', '#f1dcb8', '#e2c79c', '#f6e6c8', '#fbf0dc', '#fbf0dc', '#fbf0dc', '#e8949f', '#e0892c', '#e9d2aa'), // cream
+      coat('#d9dde3', '#b9bec7', '#c3c8d0', '#e6e9ee', '#f2f4f7', '#f2f4f7', '#f2f4f7', '#e8949f', '#4fb36a', '#cfd4db'), // silver chinchilla
+    ],
+  },
+  other: {
+    label: '기타', title: '', breed: '코숏', tier: 0, monitor: 'normal',
+    coats: [
+      coat('#e8913a', '#b8601c', '#c56f24', '#c56f24', '#fde7c8', '#fde7c8', '#fde7c8', '#f28b9a', '#1a1a2e'), // orange tabby
+      coat('#9aa3ad', '#5f6873', '#6b7480', '#6b7480', '#eef1f4', '#eef1f4', '#eef1f4', '#e88a9a', '#1a1a2e'), // grey tabby
+      coat('#2b2b35', '#2b2b35', '#1b1b22', '#1b1b22', '#f4f4f4', '#f4f4f4', '#f4f4f4', '#f29aaa', '#9be15d'), // tuxedo
+      coat('#2b2b35', '#2b2b35', '#1b1b22', '#1b1b22', '#2b2b35', '#2b2b35', '#2b2b35', '#d9768a', '#d4e84a'), // black
+      coat('#f4f1ea', '#e8913a', '#2b2b35', '#2b2b35', '#ffffff', '#ffffff', '#ffffff', '#f4a3b4', '#1a1a2e'), // calico
+    ],
+  },
 };
 export function familyOf(model) {
   const m = String(model || '').toLowerCase();
@@ -32,111 +69,89 @@ export function familyOf(model) {
 export function paletteFor(id, kind = 'employee', model = null) {
   const h = hashStr(id);
   const fam = familyOf(model);
-  const F = FAMILIES[fam];
-  return {
-    fam,
-    B: F.body[h % F.body.length],
-    accessories: F.accessories,
-    H: HAIR[(h >>> 4) % HAIR.length],
-    S: SKIN[(h >>> 8) % SKIN.length],
-    P: PANTS[(h >>> 12) % PANTS.length],
-    C: CAP[(h >>> 16) % CAP.length],
-    E: '#1a1a2e',
-    K: '#1a1a2e',
-    W: '#fdfdfd',
-    L: '#c8d0d8',
-    D: '#111',
-    A: '#ffd166',
-    kind,
-  };
+  const coats = FAMILIES[fam].coats;
+  const variant = (h >>> 4) % coats.length;
+  return { fam, variant, kind, ...coats[variant], W: '#fdfdfd', L: '#c8d0d8', D: '#111' };
 }
 
+// Adult cat. Seated poses are 8×10 facing the viewer; `walk` is a 12×8 side-on run cycle
+// facing right (the renderer mirrors it when heading left); `sit` is a 11×6 loaf for the lounge.
 const E = {
   idle: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'S.BBBB.S', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FPFFPFT',
+  ], [
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFFT', '.FFCCFFT', '.FFCCFFT', '.FPFFPF.',
   ]],
   walk: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'S.BBBB.S', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.........A.A', 'T........FFF', 'T.......FFEF', '.TFSFSFFFFUN', '..FFFFFFFFU.', '..FCCCCCFF..', '...FF..FF...', '...PP..PP...',
   ], [
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'S.BBBB.S', '..BBBB..', '..PPPP..', '.PP..PP.', '.KK..KK.',
+    '.........A.A', '.........FFF', 'TT......FFEF', '..TSFSFFFFUN', '..FFFFFFFFU.', '..FCCCCCFF..', '.FF.....FF..', 'P.........PP',
   ], [
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'S.BBBB.S', '..BBBB..', '..PPPP..', '..PPPP..', '..K..K..',
+    '.........A.A', 'T........FFF', 'T.......FFEF', '.TFSFSFFFFUN', '..FFFFFFFFU.', '..FCCCCCFF..', '..F.F..F.F..', '..P.P..P.P..',
   ]],
   type: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    '.BBBBBB.', 'SBBBBBBS', '.SBBBBS.', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFF.', '.FPCCFF.', '.FFCCFFT', '.F.FFPFT',
   ], [
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    '.BBBBBB.', '.BBBBBB.', 'SSBBBBSS', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFF.', '.FFCCPF.', '.FFCCFFT', '.FPFF.FT',
   ]],
   read: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'SWWWWWWS', '.WWLWWW.', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFF.', 'PWWLWWWP', '.WWWWWWT', '.FPFFPFT',
   ], [
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'SWWWWWWS', '.WWWLWW.', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FEFFEF.', 'RFUNNUFR', '.RFCCFR.', '.FFCCFF.', 'PWWWLWWP', '.WWWWWWT', '.FPFFPFT',
   ]],
   wait: [[
-    '..HHHH.S', '.HHHHHHS', '.HSSSSHS', '.SESSESS', '..SSSS.B', '.BBBBBBB',
-    'SBBBBBB.', 'S.BBBB..', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....AP', '.AA..AAF', '.FFSSFFF', '.FEFFEFF', 'RFUNNUF.', '.RFCCFF.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FP.FPFT',
   ], [
-    '..HHHH..', '.HHHHHH.', '.HSSSSHS', '.SESSESS', '..SSSSB.', '.BBBBBB.',
-    'SBBBBBB.', 'S.BBBB..', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AAP', '.FFSSFFF', '.FEFFEFF', 'RFUNNUF.', '.RFCCFF.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FP.FPFT',
   ]],
   phone: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSHD', '.SESSESD', '..SSSS.S', '.BBBBBBS',
-    'SBBBBBB.', 'S.BBBB..', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AA.', '.FFSSFFD', '.FEFFEFD', 'RFUNNUFP', '.RFCCFF.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FP.FPFT',
   ]],
   write: [[
-    '..HHHH.D', '.HHHHHHS', '.HSSSSHS', '.SESSESS', '..SSSS.B', '.BBBBBBB',
-    'SBBBBBB.', 'S.BBBB..', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....AD', '.AA..AAP', '.FFSSFFF', '.FEFFEFF', 'RFUNNUF.', '.RFCCFF.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FP.FPFT',
   ], [
-    '..HHHH..', '.HHHHHHD', '.HSSSSHS', '.SESSESS', '..SSSSB.', '.BBBBBB.',
-    'SBBBBBB.', 'S.BBBB..', '..BBBB..', '..PPPP..', '..PP.PP.', '..KK.KK.',
+    '.A....A.', '.AA..AAD', '.FFSSFFP', '.FEFFEFF', 'RFUNNUF.', '.RFCCFF.', '.FFCCFF.', '.FFCCFF.', '.FFCCFFT', '.FP.FPFT',
   ]],
   sit: [[
-    '..HHHH..', '.HHHHHH.', '.HSSSSH.', '.SESSES.', '..SSSS..', '.BBBBBB.',
-    'SBBBBBBS', 'S.BBBB.S', '..BBBB..', '.PPPPPP.', '.PP..PP.', '.KK..KK.',
+    '........A.A', '........FFF', '..FSFSFFFEF', '.FFFFFFFFUN', 'TFFFFFFFFCC', '.TTTTTTPP..',
   ]],
 };
 
-// Assistant (subagent): smaller, wears a cap.
+// Kitten (subagent): seated 6×8, running 9×6.
 const A = {
   idle: [[
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', 'SBBBBS', '.BBBB.', '.P..P.', '.K..K.',
+    'A....A', 'AFSSFA', 'FEFFEF', 'FUNNUF', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
+  ], [
+    'A....A', 'AFSSFA', 'FEFFEF', 'FUNNUF', '.FCCFT', '.FCCFT', '.FCCF.', '.PFFP.',
   ]],
   walk: [[
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', 'SBBBBS', '.BBBB.', '.P..P.', '.K..K.',
+    '......A.A', 'T.....FFF', '.T....FEF', '..FSFSFUN', '..FCCCFF.', '..PP.PP..',
   ], [
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', 'SBBBBS', '.BBBB.', 'P....P', 'K....K',
+    '......A.A', 'T.....FFF', 'T.....FEF', '.TFSFSFUN', '..FCCCFF.', '.P....P.P',
   ]],
   type: [[
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', '.BBBB.', 'SBBBBS', '.P..P.', '.K..K.',
+    'A....A', 'AFSSFA', 'FEFFEF', 'FUNNUF', '.FCCF.', '.PCCF.', '.FCCFT', '.FFFP.',
   ], [
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', '.BBBB.', '.SBBS.', '.P..P.', '.K..K.',
+    'A....A', 'AFSSFA', 'FEFFEF', 'FUNNUF', '.FCCF.', '.FCCP.', '.FCCFT', '.PFFF.',
   ]],
   read: [[
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', 'SWWWWS', '.WWWW.', '.P..P.', '.K..K.',
+    'A....A', 'AFSSFA', 'FEFFEF', 'FUNNUF', '.FCCF.', 'PWWLWP', '.WWWWT', '.PFFP.',
   ]],
   wait: [[
-    '.CCCC.S', 'CCCCCCS', '.SSSS.S', '.ESSE.B', '.BBBBB.', 'SBBBB.', '.BBBB.', '.P..P.', '.K..K.',
+    'A....AP', 'AFSSFAF', 'FEFFEFF', 'FUNNUF.', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
   ], [
-    '.CCCC.', 'CCCCCC', '.SSSSS', '.ESSES', '.BBBB.', 'SBBBB.', '.BBBB.', '.P..P.', '.K..K.',
+    'A....A.', 'AFSSFAP', 'FEFFEFF', 'FUNNUF.', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
   ]],
   phone: [[
-    '.CCCC.', 'CCCCCC', '.SSSSD', '.ESSED', '.BBBBS', 'SBBBB.', '.BBBB.', '.P..P.', '.K..K.',
+    'A....A', 'AFSSFD', 'FEFFED', 'FUNNUP', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
   ]],
   write: [[
-    '.CCCC.D', 'CCCCCCS', '.SSSS.S', '.ESSE.B', '.BBBBB.', 'SBBBB.', '.BBBB.', '.P..P.', '.K..K.',
+    'A....AD', 'AFSSFAP', 'FEFFEFF', 'FUNNUF.', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
   ], [
-    '.CCCC.', 'CCCCCD', '.SSSSS', '.ESSES', '.BBBB.', 'SBBBB.', '.BBBB.', '.P..P.', '.K..K.',
+    'A....A.', 'AFSSFAD', 'FEFFEFP', 'FUNNUF.', '.FCCF.', '.FCCFT', '.FCCFT', '.PFFP.',
   ]],
   sit: [[
-    '.CCCC.', 'CCCCCC', '.SSSS.', '.ESSE.', '.BBBB.', 'SBBBBS', '.BBBB.', 'PP..PP', 'KK..KK',
+    '......A.A', '......FFF', '.FSFSFFEF', 'TFFFFFFUN', '.TTTTPP..',
   ]],
 };
 
@@ -149,7 +164,7 @@ export function sprite(pal, anim, frame) {
   const sheet = SHEETS[pal.kind] || E;
   const frames = sheet[anim] || sheet.idle;
   const rows = frames[frame % frames.length];
-  const key = `${pal.kind}|${pal.fam}|${pal.B}|${pal.H}|${pal.S}|${pal.P}|${pal.C}|${anim}|${frame % frames.length}`;
+  const key = `${pal.kind}|${pal.fam}|${pal.variant}|${anim}|${frame % frames.length}`;
   let c = cache.get(key);
   if (c) return c;
   const w = Math.max(...rows.map((r) => r.length));
@@ -158,53 +173,14 @@ export function sprite(pal, anim, frame) {
   const g = c.getContext('2d');
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < rows[y].length; x++) {
-      const ch = rows[y][x];
-      if (ch === '.') continue;
-      g.fillStyle = pal[ch] || '#f0f';
+      const color = pal[rows[y][x]];
+      if (!color) continue; // '.' and absent features (e.g. no ruff on short-haired breeds)
+      g.fillStyle = color;
       g.fillRect(x, y, 1, 1);
     }
   }
-  drawAccessory(g, pal, rows);
   cache.set(key, c);
   return c;
-}
-
-/** Model-family accessories drawn over the base sprite (8×12 employee / 6×9 assistant grids). */
-function drawAccessory(g, pal, rows) {
-  const asst = pal.kind === 'assistant';
-  for (const spec of pal.accessories || []) {
-    const [name, color] = spec.split(':');
-    g.fillStyle = color;
-    switch (name) {
-      case 'tie':
-        if (asst) { g.fillRect(2, 4, 2, 1); g.fillRect(2, 5, 2, 1); }
-        else { g.fillRect(3, 5, 2, 1); g.fillRect(3, 6, 2, 1); g.fillRect(3, 7, 2, 1); g.fillRect(3, 8, 1, 1); }
-        break;
-      case 'pin': // badge on the chest
-        if (asst) g.fillRect(4, 4, 1, 1); else g.fillRect(1, 6, 1, 1);
-        break;
-      case 'glasses': {
-        const y = 3;
-        const eyes = [];
-        for (let x = 0; x < rows[y].length; x++) if (rows[y][x] === 'E') eyes.push(x);
-        for (const ex of eyes) { g.fillRect(ex - 1, y, 1, 1); g.fillRect(ex + 1, y, 1, 1); }
-        if (eyes.length === 2) g.fillRect(eyes[0] + 1, y, eyes[1] - eyes[0] - 1, 1);
-        break;
-      }
-      case 'headphones':
-        if (asst) { g.fillRect(1, 0, 4, 1); g.fillRect(0, 1, 1, 2); g.fillRect(5, 1, 1, 2); }
-        else { g.fillRect(2, 0, 4, 1); g.fillRect(1, 1, 1, 1); g.fillRect(6, 1, 1, 1); g.fillRect(0, 2, 1, 2); g.fillRect(7, 2, 1, 2); }
-        break;
-      case 'lanyard': // intern badge on a strap
-        if (asst) { g.fillRect(2, 5, 2, 2); g.fillStyle = '#e74c3c'; g.fillRect(2, 5, 2, 1); }
-        else {
-          g.fillStyle = '#e74c3c'; g.fillRect(2, 5, 1, 1); g.fillRect(5, 5, 1, 1); g.fillRect(3, 6, 2, 1);
-          g.fillStyle = color; g.fillRect(3, 7, 2, 2);
-          g.fillStyle = '#3b82f6'; g.fillRect(3, 8, 2, 1);
-        }
-        break;
-    }
-  }
 }
 
 /** Map an entity state to a sprite animation name. */

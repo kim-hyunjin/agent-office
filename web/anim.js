@@ -1,6 +1,6 @@
 import { TILE } from './tilemap.js';
 
-export const SPEED = 44; // logical px per second
+export const SPEED = 64; // logical px per second (cats run)
 
 /** Advance an entity along its path. Returns true if it moved. */
 export function step(ent, dt) {
@@ -10,6 +10,7 @@ export function step(ent, dt) {
   const dx = tx - ent.x, dy = ty - ent.y;
   const dist = Math.hypot(dx, dy);
   const d = SPEED * dt;
+  if (Math.abs(dx) > 0.5) ent.dir = dx < 0 ? -1 : 1; // facing for the side-on run sprite
   if (dist <= d) {
     ent.x = tx; ent.y = ty;
     ent.path.shift();
