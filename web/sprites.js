@@ -264,6 +264,14 @@ export function drawGlyph(g, name, x, y, t) {
       g.fillRect(x, y + 2, 1, 1); g.fillRect(x + 1, y + 3, 1, 1); g.fillRect(x + 2, y + 2, 1, 1); g.fillRect(x + 3, y + 1, 1, 1); g.fillRect(x + 4, y, 1, 1);
       break;
     }
+    case 'term': { // shell running: tiny terminal window with a prompt and blinking cursor
+      g.fillStyle = '#5dff7a'; g.fillRect(x, y, 9, 6);
+      g.fillStyle = '#0a120a'; g.fillRect(x + 1, y + 1, 7, 4);
+      g.fillStyle = '#5dff7a';
+      g.fillRect(x + 2, y + 2, 1, 1); g.fillRect(x + 3, y + 3, 1, 1); g.fillRect(x + 2, y + 4, 1, 1); // '>'
+      if (Math.floor(t / 400) % 2) g.fillRect(x + 5, y + 3, 2, 1); // '_'
+      break;
+    }
     case 'cup': { // coffee in hand
       g.fillStyle = '#fafafa'; g.fillRect(x, y, 3, 3);
       g.fillStyle = '#6f4e37'; g.fillRect(x, y, 3, 1);
