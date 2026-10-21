@@ -1,5 +1,5 @@
 import { TILE, W, H, DESK_COUNT, deskPos, ROOMS, WHITEBOARD, PLAN_ZONE, LOUNGE, LOBBY, LIBRARY_ZONE, SIGN } from './tilemap.js';
-import { sprite, animFor, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
+import { sprite, outline, OUTLINE_W, animFor, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
@@ -107,8 +107,7 @@ function drawDeskProps(g, d, state, t, fam = 'other', mode = null) {
   g.fillStyle = '#6b6f7a'; for (let i = 0; i < 5; i++) g.fillRect(dx + 28 + i * 2, dy + 6, 1, 1);
   g.fillStyle = '#50545e'; g.fillRect(dx + 40, dy + 5, 3, 3);
   // left side: mode / state props
-  if (AUTO_MODES.has(mode) && state !== 'offduty') drawGlyph(g, 'bolt', dx + 3, dy + 3, t);
-  else if (mode === 'acceptEdits' && state !== 'offduty') drawGlyph(g, 'check', dx + 2, dy + 4, t);
+  if (mode === 'acceptEdits' && state !== 'offduty') drawGlyph(g, 'check', dx + 2, dy + 4, t);
   if (state === 'idle' || state === 'offduty') {
     g.fillStyle = '#fafafa'; g.fillRect(dx + 44, dy + 9, 3, 3); g.fillStyle = '#6f4e37'; g.fillRect(dx + 44, dy + 9, 3, 1);
   } else if (state === 'reading' || state === 'searching') {
@@ -158,13 +157,15 @@ function drawEntity(g, e, t, selected, hovered) {
   const bob = !moving && (anim === 'idle' || anim === 'read' || anim === 'sit') && Math.floor((t + e.seed) / 700) % 2 ? 1 : 0;
   g.globalAlpha = e.alpha;
   g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, img.width, 2);
-  if (selected || hovered) {
-    g.fillStyle = selected ? 'rgba(255,209,102,0.55)' : 'rgba(255,255,255,0.35)';
-    g.fillRect(e.x + ox - 2, e.y + oy - 2 + bob, img.width + 4, img.height + 4);
-  }
+  const ring = selected ? outline(img, '#ffd166') : hovered ? outline(img, 'rgba(255,255,255,0.7)') : null;
   if (anim === 'walk' && e.dir < 0) {
-    g.save(); g.translate(e.x + ox + img.width, e.y + oy); g.scale(-1, 1); g.drawImage(img, 0, 0); g.restore();
-  } else g.drawImage(img, e.x + ox, e.y + oy + bob);
+    g.save(); g.translate(e.x + ox + img.width, e.y + oy); g.scale(-1, 1);
+    if (ring) g.drawImage(ring, -OUTLINE_W, -OUTLINE_W);
+    g.drawImage(img, 0, 0); g.restore();
+  } else {
+    if (ring) g.drawImage(ring, e.x + ox - OUTLINE_W, e.y + oy + bob - OUTLINE_W);
+    g.drawImage(img, e.x + ox, e.y + oy + bob);
+  }
   if (anim === 'sit' || stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
   // indicators above the head
   const gx = e.x + ox + Math.floor(img.width / 2) - 3, gy = e.y + oy - 4;
@@ -179,8 +180,7 @@ function drawEntity(g, e, t, selected, hovered) {
     }
   }
   if (!isAsst && e.phase !== 'leave') {
-    if (auto) drawGlyph(g, 'bolt', e.x + ox - 4, e.y + oy, t);
-    else if (data.permissionMode === 'acceptEdits') drawGlyph(g, 'check', e.x + ox - 6, e.y + oy + 1, t);
+    if (data.permissionMode === 'acceptEdits') drawGlyph(g, 'check', e.x + ox - 6, e.y + oy + 1, t);
   }
   g.globalAlpha = 1;
 }

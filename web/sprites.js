@@ -183,6 +183,31 @@ export function sprite(pal, anim, frame) {
   return c;
 }
 
+const outlines = new WeakMap(); // sprite canvas -> Map(color -> canvas)
+
+export const OUTLINE_W = 2;
+
+/** An OUTLINE_W-px outline hugging the sprite's opaque pixels, on a canvas OUTLINE_W larger each way. */
+export function outline(img, color) {
+  let byColor = outlines.get(img);
+  if (!byColor) outlines.set(img, byColor = new Map());
+  let c = byColor.get(color);
+  if (c) return c;
+  const r = OUTLINE_W;
+  c = new OffscreenCanvas(img.width + r * 2, img.height + r * 2);
+  const g = c.getContext('2d');
+  // stamp the sprite at every offset within a rounded radius, so corners don't go square
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (dx * dx + dy * dy <= r * r + 1) g.drawImage(img, r + dx, r + dy);
+  }
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = color; g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'destination-out';
+  g.drawImage(img, r, r);
+  byColor.set(color, c);
+  return c;
+}
+
 /** Map an entity state to a sprite animation name. */
 export function animFor(state, moving, station = null) {
   if (moving) return 'walk';
@@ -228,11 +253,6 @@ export function drawGlyph(g, name, x, y, t) {
     case 'plane': {
       g.fillStyle = '#ffffff';
       g.fillRect(x, y, 3, 1); g.fillRect(x, y + 1, 2, 1); g.fillRect(x, y + 2, 1, 1);
-      break;
-    }
-    case 'bolt': { // auto / bypass permissions
-      g.fillStyle = '#ffd166';
-      g.fillRect(x + 1, y, 2, 1); g.fillRect(x, y + 1, 2, 1); g.fillRect(x, y + 2, 3, 1); g.fillRect(x + 1, y + 3, 2, 1); g.fillRect(x + 1, y + 4, 1, 1);
       break;
     }
     case 'check': { // acceptEdits
