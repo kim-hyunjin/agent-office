@@ -93,6 +93,15 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { id: s.id, log: s.log.toArray() });
       return;
     }
+    const rm = req.method === 'GET' && p.match(/^\/sessions\/([^/]+)\/reply$/);
+    if (rm) {
+      const s = store.sessions.get(decodeURIComponent(rm[1]));
+      const agentId = url.searchParams.get('agent');
+      const ent = agentId ? s?.subagents.get(agentId) : s;
+      if (!ent) { json(res, 404, { error: 'not found' }); return; }
+      json(res, 200, { id: s.id, agentId, text: ent.replyText || ent.lastText || '', at: ent.lastTextAt });
+      return;
+    }
     const pm = req.method === 'POST' && p.match(/^\/sessions\/([^/]+)\/prompt$/);
     if (pm) {
       const data = await readJson(req, res);

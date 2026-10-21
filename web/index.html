@@ -31,6 +31,17 @@
     </div>
   </form>
 </dialog>
+<dialog id="reply">
+  <header>
+    <div>
+      <h2 id="r-name"></h2>
+      <p id="r-meta" class="dim"></p>
+    </div>
+    <button type="button" id="r-copy" title="마크다운 원문 복사">복사</button>
+    <button type="button" id="r-close" title="닫기 (Esc)">×</button>
+  </header>
+  <article id="r-body" class="md"></article>
+</dialog>
 <div id="tip" hidden></div>
 <div id="ticker"><ul id="ticker-list"></ul></div>
 <aside id="panel">
@@ -48,7 +59,7 @@
     <blockquote id="p-prompt" class="prompt" hidden></blockquote>
     <p id="p-thinking" class="thinking" hidden></p>
     <div id="p-agents" hidden></div>
-    <blockquote id="p-last" hidden></blockquote>
+    <blockquote id="p-last" title="클릭해서 크게 보기" tabindex="0" hidden></blockquote>
     <div id="p-files"></div>
     <h3>활동 로그</h3>
     <ul id="p-log"></ul>

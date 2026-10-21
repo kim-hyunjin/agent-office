@@ -1,5 +1,6 @@
 import { STATE_LABEL, STATE_COLOR } from './render.js';
 import { FAMILIES, familyOf } from './sprites.js';
+import { openReply, refreshReply } from './reply.js';
 
 export const ICON = {
   Read: '📖', Grep: '🔍', Glob: '🔍', LS: '📂', Edit: '✏️', Write: '✏️', MultiEdit: '✏️', NotebookEdit: '✏️',
@@ -38,6 +39,9 @@ export class Panel {
     this.isOpen = false;
     this.quitBtn = el.querySelector('#p-quit');
     this.quitBtn.addEventListener('click', () => this.quit());
+    const last = el.querySelector('#p-last');
+    last.addEventListener('click', () => { if (this.session) openReply(this.session); });
+    last.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && this.session) { e.preventDefault(); openReply(this.session); } });
     this.timer = setInterval(() => { if (this.id && this.session) this.renderMeta(this.session); }, 1000);
   }
 
@@ -78,6 +82,7 @@ export class Panel {
     this.session = session;
     this.renderMeta(session);
     this.addEntries(session.log || []);
+    refreshReply(session);
   }
 
   remove(id) { this.drafts.delete(id); if (id === this.id) this.close(); }

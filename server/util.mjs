@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { MAX_REPLY_CHARS } from './config.mjs';
 
 export function safeJsonParse(text) {
   try { return JSON.parse(text); } catch { return null; }
@@ -15,6 +16,11 @@ export function truncate(s, n) {
 }
 
 /** Strip code fences / markdown noise so a bubble reads naturally. */
+/** Assistant text kept verbatim (markdown intact) for the reply dialog. */
+export function replyText(s) {
+  return truncate(String(s ?? '').trim(), MAX_REPLY_CHARS);
+}
+
 export function cleanText(s, n = 280) {
   s = String(s ?? '')
     .replace(/```[\s\S]*?```/g, ' [code] ')

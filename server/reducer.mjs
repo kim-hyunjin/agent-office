@@ -1,4 +1,4 @@
-import { summarizeToolInput, detailForTool, truncate, cleanText, oneLine } from './util.mjs';
+import { summarizeToolInput, detailForTool, truncate, cleanText, replyText, oneLine } from './util.mjs';
 
 const TOOL_STATE = [
   [/^(Read|Grep|Glob|LS)$/, 'reading'],
@@ -102,7 +102,7 @@ function apply(store, ev) {
       const text = cleanText(ev.last_assistant_message || '', 280);
       ent.currentTool = null;
       store.setState(ent, 'idle');
-      if (text) { ent.lastText = text; ent.lastTextAt = now; }
+      if (text) { ent.lastText = text; ent.lastTextAt = now; ent.replyText = replyText(ev.last_assistant_message); }
       store.log(s, { ev: name, text: who + truncate(text, 200) });
       break;
     }
@@ -125,7 +125,7 @@ function apply(store, ev) {
     case 'SubagentStop': {
       if (agent) {
         const text = cleanText(ev.last_assistant_message || '', 280);
-        if (text) { agent.lastText = text; agent.lastTextAt = now; }
+        if (text) { agent.lastText = text; agent.lastTextAt = now; agent.replyText = replyText(ev.last_assistant_message); }
         if (ev.agent_transcript_path) agent.transcriptPath = ev.agent_transcript_path;
         store.endSubagent(agent);
       }

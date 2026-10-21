@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { TRANSCRIPT_TAIL_BYTES } from './config.mjs';
-import { readTail, readFrom, safeJsonParse, cleanText, oneLine } from './util.mjs';
+import { readTail, readFrom, safeJsonParse, cleanText, replyText, oneLine } from './util.mjs';
 
 /**
  * Tails session / subagent transcripts (append-only JSONL) to fill in
@@ -109,7 +109,7 @@ export class Tailer {
       const text = cleanText(b.text, 280);
       if (!text) continue;
       const at = Date.parse(o.timestamp) || Date.now();
-      if (at >= ent.lastTextAt) { ent.lastText = text; ent.lastTextAt = at; changed = true; }
+      if (at >= ent.lastTextAt) { ent.lastText = text; ent.lastTextAt = at; ent.replyText = replyText(b.text); changed = true; }
     }
     return changed;
   }

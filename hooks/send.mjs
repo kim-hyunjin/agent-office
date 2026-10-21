@@ -29,9 +29,11 @@ function shrink(ev) {
     ev.tool_response_head = text.slice(0, 400);
     delete ev.tool_response;
   }
-  for (const k of ['prompt', 'last_assistant_message', 'message', 'error', 'compact_summary', 'custom_instructions']) {
+  for (const k of ['prompt', 'message', 'error', 'compact_summary', 'custom_instructions']) {
     if (typeof ev[k] === 'string') ev[k] = clip(ev[k], 2000);
   }
+  // Kept whole for the reply dialog; the server caps it (MAX_REPLY_CHARS) well under MAX_BODY_BYTES.
+  ev.last_assistant_message = clip(ev.last_assistant_message, 200_000);
   if (ev.tool_input && typeof ev.tool_input === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(ev.tool_input)) {

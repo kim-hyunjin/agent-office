@@ -100,6 +100,7 @@ export class Store {
       currentTool: null,
       lastText: null,
       lastTextAt: 0,
+      replyText: null,     // full markdown of lastText, for the reply dialog
       lastPrompt: null,
       lastThinking: null,
       lastThinkingAt: 0,
@@ -163,6 +164,7 @@ export class Store {
       currentTool: null,
       lastText: null,
       lastTextAt: 0,
+      replyText: null,     // full markdown of lastText, for the reply dialog
       startedAt: now,
       lastEventAt: now,
       ended: false,

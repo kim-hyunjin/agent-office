@@ -15,6 +15,7 @@ export const STATE_FILE = path.join(DATA_DIR, 'state.json');
 export const ORCA_BIN = process.env.AGENT_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
   || (process.platform === 'win32' ? 'orca.exe' : process.platform === 'linux' ? 'orca-ide' : 'orca');
 export const MAX_PROMPT_CHARS = 20_000;
+export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (served on demand, not over SSE)
 
 export const WEB_DIR = path.resolve(import.meta.dirname, '../web');
 
