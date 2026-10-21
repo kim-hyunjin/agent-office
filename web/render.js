@@ -223,7 +223,8 @@ function shadowText(ctx, text, x, y, color) {
 
 /** Name tag under the desk: name / current tool (or where they went) / rank · mode. */
 function drawNameplate(ctx, S, s, e) {
-  if (s.desk >= DESK_COUNT) return;
+  // ended sessions linger in the store for a while, but their desk is already free (maybe reassigned)
+  if (s.ended || s.desk >= DESK_COUNT) return;
   const d = deskPos(s.desk);
   const px = (d.caption.x * TILE + 2) * S, py = (d.caption.y * TILE + 1) * S;
   const maxW = d.caption.w * TILE * S - 4 * S;
@@ -233,12 +234,11 @@ function drawNameplate(ctx, S, s, e) {
   shadowText(ctx, fitText(ctx, s.name, maxW), px, py, away ? 'rgba(255,255,255,0.6)' : '#fff');
   ctx.font = `${fpx(4.2, S)}px ${FONT}`;
   let line2, color;
-  if (s.ended) { line2 = '퇴근'; color = STATE_COLOR.offduty; }
-  else if (away && e?.station) { line2 = (PLACE_LABEL[e.station.kind] || (() => ''))(e.station); color = 'rgba(255,255,255,0.55)'; }
+  if (away && e?.station) { line2 = (PLACE_LABEL[e.station.kind] || (() => ''))(e.station); color = 'rgba(255,255,255,0.55)'; }
   else { line2 = toolText(s); color = STATE_COLOR[s.state] || '#fff'; }
   shadowText(ctx, fitText(ctx, line2, maxW), px, py + 5.6 * S, color);
   const title = (FAMILIES[familyOf(s.model)] || FAMILIES.other).title;
-  const mode = s.ended ? '' : MODE_LABEL[s.permissionMode];
+  const mode = MODE_LABEL[s.permissionMode];
   const line3 = [title, mode].filter(Boolean).join(' · ');
   if (line3) {
     ctx.font = `${fpx(3.6, S)}px ${FONT}`;
