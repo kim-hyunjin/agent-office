@@ -4,7 +4,8 @@ import {
 } from './tilemap.js';
 import { paletteFor, hashStr, familyOf, FAMILIES } from './sprites.js';
 import { step, clamp } from './anim.js';
-import { render, STATE_LABEL } from './render.js';
+import { render, STATE_LABEL, NEW_BTN } from './render.js';
+import { openLauncher } from './launcher.js';
 import { Panel, ICON, EV_ICON, esc, fmtTime } from './panel.js';
 
 const params = new URLSearchParams(location.search);
@@ -16,8 +17,8 @@ const canvas = document.getElementById('office');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const panel = new Panel(document.getElementById('panel'), {
-  onOpen: () => resize(),
-  onClose: () => { world.selectedKey = null; history.replaceState(null, '', location.pathname); resize(); },
+  onOpen: () => refit(),
+  onClose: () => { world.selectedKey = null; history.replaceState(null, '', location.pathname); refit(); },
 });
 
 /** Sticky slot allocator: a key keeps its slot until released. */
@@ -49,20 +50,55 @@ const world = {
 };
 let S = 3;
 
-function resize() {
-  const panelW = panel.el.hidden ? 0 : panel.el.offsetWidth;
-  document.getElementById('stage').style.marginRight = `${panelW}px`;
+const PANEL_W = 380; // keep in sync with #panel width in style.css
+const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit transitions
+// Width the open panel takes from the office. On narrow windows the panel just covers it.
+const panelRoom = () => (panel.isOpen && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
+
+function fitScale() {
   const ticker = document.getElementById('ticker');
-  ticker.style.right = `${panelW}px`;
-  const availW = window.innerWidth - 16 - panelW;
+  const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight);
-  // Fill the window. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
-  S = clamp(Math.floor(Math.min(availW / W, availH / H) * 20) / 20, 1, 8);
+  // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
+  return clamp(Math.floor(Math.min(availW / W, availH / H) * 20) / 20, 1, 8);
+}
+
+function placeTicker() {
+  document.getElementById('ticker').style.right = `${panel.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0}px`;
+}
+
+/** Fit the office to the window at once (backing store + CSS size). */
+function resize() {
+  clearTimeout(refitTimer);
+  canvas.classList.remove('refit');
+  S = fitScale();
   canvas.width = Math.round(W * S); canvas.height = Math.round(H * S);
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
+  placeTicker();
+}
+
+/**
+ * Panel opened/closed: ease the CSS size toward the new fit (left edge stays put while it grows
+ * or shrinks), then re-rasterize at that size so pixels and text are crisp again.
+ */
+let refitTimer = null;
+function refit() {
+  placeTicker();
+  const s = fitScale();
+  if (s === S && !canvas.classList.contains('refit')) return;
+  canvas.classList.add('refit');
+  canvas.style.width = `${Math.round(W * s)}px`; canvas.style.height = `${Math.round(H * s)}px`;
+  clearTimeout(refitTimer);
+  refitTimer = setTimeout(resize, PANEL_ANIM_MS + 20);
 }
 window.addEventListener('resize', resize);
 resize();
+
+/** Pointer position in office (unscaled) pixels; CSS size can differ from the backing store mid-refit. */
+function officeXY(ev) {
+  const k = canvas.width / (canvas.clientWidth || canvas.width);
+  return [(ev.offsetX * k) / S, (ev.offsetY * k) / S];
+}
 
 // ---- stations ------------------------------------------------------------------
 // Two desks of a pod share one aisle column, so near-desk slots are keyed by the aisle, not the desk.
@@ -331,8 +367,12 @@ function describe(e) {
     + `<div class="dim">${esc(s.cwd)}${s.model ? ' · ' + esc(s.model) : ''}</div>`;
 }
 
+const onNewBtn = ([x, y]) => { const b = world.newBtn; return !!b && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h; };
+
 canvas.addEventListener('mousemove', (ev) => {
-  const e = entAt(ev.offsetX / S, ev.offsetY / S);
+  const xy = officeXY(ev);
+  if (onNewBtn(xy)) { world.hoverKey = NEW_BTN; canvas.style.cursor = 'pointer'; tip.hidden = true; return; }
+  const e = entAt(...xy);
   world.hoverKey = e ? e.key : null;
   canvas.style.cursor = e ? 'pointer' : 'default';
   if (e) {
@@ -347,7 +387,9 @@ canvas.addEventListener('mousemove', (ev) => {
 });
 canvas.addEventListener('mouseleave', () => { world.hoverKey = null; tip.hidden = true; });
 canvas.addEventListener('click', (ev) => {
-  const e = entAt(ev.offsetX / S, ev.offsetY / S);
+  const xy = officeXY(ev);
+  if (onNewBtn(xy)) { openLauncher(); return; }
+  const e = entAt(...xy);
   if (!e) { world.selectedKey = null; panel.close(); return; }
   world.selectedKey = e.key;
   const s = world.sessions.get(e.sessionId);

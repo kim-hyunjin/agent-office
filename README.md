@@ -84,6 +84,19 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 
 `hooks/send.mjs`는 `tool_response`의 앞 400자만 남기고 버리며, Agent 툴의 지시문은 600자까지 보조 직원에게 연결합니다. 생각 중 내용과 비용은 transcript에서 읽습니다(thinking 블록, `cost-state`).
 
+## 웹에서 지시하기 (Orca)
+
+[Orca](https://github.com/stablyai/orca) 터미널에서 실행 중인 세션에는 웹에서 직접 지시를 보낼 수 있습니다. `orca` CLI가 PATH에 있어야 합니다.
+
+- **기존 직원에게 지시**: 직원을 클릭하고 패널 아래 입력창에 쓰고 Enter를 누릅니다(Shift+Enter는 줄바꿈). 서버가 `orca terminal send`로 그 세션의 터미널에 입력합니다. 직접 타이핑한 것과 똑같이 처리되고, 작업 중이면 Claude Code가 큐에 넣습니다.
+- **새 직원 채용**: 사무실 아래쪽 벽, 직급 범례 옆의 `+ 새 직원` 버튼을 누르고 워크트리, 모델(선택), 첫 지시(선택)를 고르면 `orca agent launch --agent claude`로 새 세션을 띄웁니다. 곧 로비로 들어옵니다.
+- **퇴근시키기**: 패널 머리의 `퇴근`을 두 번 누릅니다(첫 클릭은 확인용). 대기 중인 세션은 `/exit`로 깔끔하게 끝납니다. 웹에서 띄운 세션이면 탭도 닫히고, 직접 연 탭이면 셸이 남습니다. 작업 중이거나 권한 응답 대기 중이면 `강제 종료`로 바뀌고, Orca 터미널 탭을 닫아 진행 중인 작업을 끊습니다. 대화는 `claude --resume <세션 ID>`로 이어갈 수 있습니다.
+- 권한 승인이나 질문 응답을 기다리는 세션에는 지시를 보내지 않습니다. 보낸 Enter가 다이얼로그의 기본 선택(승인)으로 들어갈 수 있기 때문입니다. 터미널에서 먼저 답해 주세요.
+
+세션과 터미널은 훅이 보내는 `ORCA_TERMINAL_HANDLE`로 연결합니다(Orca가 관리 터미널에 넣어 주는 변수). 훅이 아직 안 온 세션은 같은 워크트리의 claude 터미널이 하나뿐일 때만 자동으로 짝을 짓습니다. 후보가 여럿이면 그 세션에서 한 번 프롬프트를 보내 연결하세요.
+
+터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /orca/launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다.
+
 ## 모델별 외형 (직급)
 
 직원의 옷차림, 책상 장비, 이름표 직함은 세션이 쓰는 모델 계열에 따라 정해집니다(화면 우하단 범례). 상위 모델일수록 '선임'처럼 보입니다. 같은 계열 안에서는 세션마다 머리·피부색이 달라집니다.
@@ -106,6 +119,7 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 | `AGENT_OFFICE_DATA` | `~/.agent-office` | 책상 배정 저장 위치 |
 | `AGENT_OFFICE_DEBUG` | | `1`이면 훅 스크립트가 `~/.agent-office/hook.log`에 기록 |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 설정 디렉터리를 옮긴 경우 |
+| `AGENT_OFFICE_ORCA_BIN` | `orca.exe` (Windows) / `orca` (macOS) / `orca-ide` (Linux) | Orca CLI 실행 파일. `ORCA_CLI_COMMAND`가 있으면 그 값을 씁니다. |
 
 ## 트러블슈팅
 
@@ -118,8 +132,8 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 
 ```
 server/   index.mjs(HTTP/SSE) · reducer.mjs(이벤트→상태) · store.mjs(모델/책상/영속화)
-          registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail)
-web/      office.js(진입점) · render.js · sprites.js · tilemap.js · panel.js
+          registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
+web/      office.js(진입점) · render.js · sprites.js · tilemap.js · panel.js · launcher.js(새 직원)
 hooks/    send.mjs(훅 본체) · install.mjs · uninstall.mjs
 scripts/  demo.mjs(가짜 이벤트 재생)
 ```

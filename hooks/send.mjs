@@ -51,6 +51,8 @@ async function main() {
   try { ev = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { log('bad json'); return; }
   if (!ev || typeof ev !== 'object') return;
   shrink(ev);
+  // Set by Orca in its managed terminals; lets the office type into this session.
+  if (process.env.ORCA_TERMINAL_HANDLE) ev.orca_terminal = process.env.ORCA_TERMINAL_HANDLE;
   try {
     await fetch(`http://127.0.0.1:${PORT}/hook`, {
       method: 'POST',

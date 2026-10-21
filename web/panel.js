@@ -10,6 +10,7 @@ export const EV_ICON = {
   SubagentStart: '🧢', SubagentStop: '🧢', PostToolUseFailure: '⚠️', PreModelSwitch: '🔁', PostModelSwitch: '🔁',
 };
 const MODE_LABEL = { plan: '계획', auto: '자동', bypassPermissions: '자동 (bypass)', dontAsk: '자동 (dontAsk)', acceptEdits: '편집 승인', default: '기본' };
+const BUSY = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read']);
 
@@ -21,17 +22,37 @@ export class Panel {
     this.entries = new Map();
     this.onClose = onClose;
     el.querySelector('#p-close').addEventListener('click', () => this.close());
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+      if (e.target === this.input) { this.input.blur(); return; }
+      this.close();
+    });
+    this.drafts = new Map(); // sessionId -> unsent text
+    this.input = el.querySelector('#p-input');
+    this.composeMsg = el.querySelector('#p-compose-msg');
+    this.input.addEventListener('keydown', (e) => {
+      // isComposing: Enter that commits a Hangul syllable must not send.
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
+    });
+    el.querySelector('#p-compose').addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
+    this.isOpen = false;
+    this.quitBtn = el.querySelector('#p-quit');
+    this.quitBtn.addEventListener('click', () => this.quit());
     this.timer = setInterval(() => { if (this.id && this.session) this.renderMeta(this.session); }, 1000);
   }
 
   async open(session) {
+    if (this.id && this.id !== session.id) this.drafts.set(this.id, this.input.value);
+    if (this.id !== session.id) { this.input.value = this.drafts.get(session.id) || ''; this.setComposeMsg(''); }
     this.id = session.id;
     this.session = session;
     this.entries = new Map();
-    const wasHidden = this.el.hidden;
-    this.el.hidden = false;
-    if (wasHidden) this.onOpen?.();
+    this.resetQuit();
+    if (!this.isOpen) {
+      this.isOpen = true;
+      this.el.classList.add('open'); // slides in via CSS transition
+      this.onOpen?.();
+    }
     this.renderMeta(session);
     this.addEntries(session.log || []);
     try {
@@ -41,8 +62,12 @@ export class Panel {
   }
 
   close() {
-    if (this.el.hidden) return;
-    this.el.hidden = true;
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    this.el.classList.remove('open');
+    if (this.el.contains(document.activeElement)) document.activeElement.blur();
+    this.resetQuit();
+    if (this.id) this.drafts.set(this.id, this.input.value);
     this.id = null;
     this.session = null;
     this.onClose?.();
@@ -55,7 +80,92 @@ export class Panel {
     this.addEntries(session.log || []);
   }
 
-  remove(id) { if (id === this.id) this.close(); }
+  remove(id) { this.drafts.delete(id); if (id === this.id) this.close(); }
+
+  setComposeMsg(text, kind = '') {
+    this.composeMsg.textContent = text;
+    this.composeMsg.className = `msg ${kind}`;
+  }
+
+  /** Type the composer text into the session's Orca terminal. */
+  async send() {
+    const id = this.id, text = this.input.value.trim();
+    if (!id || !text || this.sending || this.session?.state === 'waiting') return;
+    this.sending = true;
+    this.el.querySelector('#p-send').disabled = true;
+    this.setComposeMsg('보내는 중…');
+    try {
+      const r = await fetch(`/sessions/${encodeURIComponent(id)}/prompt`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      this.drafts.delete(id);
+      if (this.id === id) { this.input.value = ''; this.setComposeMsg('전달됨 ✓', 'ok'); }
+    } catch (e) {
+      if (this.id === id) this.setComposeMsg(e.message, 'err');
+    } finally {
+      this.sending = false;
+      this.renderCompose(this.session);
+    }
+  }
+
+  /**
+   * End the session. First click arms, second click (within 4s) sends. Idle → `/exit` (clean
+   * SessionEnd, tab stays); anything else → close the Orca terminal outright. Typing `/exit`
+   * into a permission dialog could hit its default option, so only an idle prompt gets text.
+   */
+  async quit() {
+    const s = this.session;
+    if (!s || s.ended || this.quitting) return;
+    const force = s.state !== 'idle';
+    if (!this.quitArmed) {
+      this.quitArmed = true;
+      this.quitBtn.classList.add('armed');
+      this.quitBtn.textContent = force ? `${BUSY.has(s.state) ? '작업 중' : '응답 대기'} — 강제 종료?` : '정말 퇴근?';
+      this.quitBtn.title = force ? 'Orca 터미널 탭을 닫아 진행 중인 작업을 끊습니다' : '/exit 로 세션을 끝냅니다';
+      this.quitTimer = setTimeout(() => this.resetQuit(), 4000);
+      return;
+    }
+    this.resetQuit();
+    this.quitting = true;
+    this.quitBtn.disabled = true;
+    this.setComposeMsg(force ? '터미널을 닫는 중…' : '퇴근 지시 중…');
+    const id = s.id;
+    try {
+      const r = await fetch(`/sessions/${encodeURIComponent(id)}/close`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (this.id === id) this.setComposeMsg(force ? '터미널을 닫았습니다.' : '퇴근합니다 👋', 'ok');
+    } catch (e) {
+      if (this.id === id) this.setComposeMsg(e.message, 'err');
+    } finally {
+      this.quitting = false;
+      this.quitBtn.disabled = false;
+    }
+  }
+
+  resetQuit() {
+    clearTimeout(this.quitTimer);
+    this.quitArmed = false;
+    if (!this.quitBtn) return;
+    this.quitBtn.classList.remove('armed');
+    this.quitBtn.textContent = '퇴근';
+    this.quitBtn.title = '이 세션 종료';
+  }
+
+  renderCompose(s) {
+    if (!s) return;
+    this.quitBtn.hidden = !!s.ended;
+    const off = !!s.ended, waiting = s.state === 'waiting';
+    this.input.disabled = off;
+    this.el.querySelector('#p-send').disabled = off || waiting || !!this.sending;
+    this.input.placeholder = off ? '퇴근한 직원입니다.'
+      : waiting ? '권한 승인·질문 응답 대기 중 — 터미널에서 먼저 답해주세요. (써 두고 나중에 보낼 수 있어요)'
+      : `이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)${s.orcaTerminal ? '' : '\nOrca 터미널 연결 전 — 보내면 자동으로 찾아봅니다.'}`;
+  }
 
   renderMeta(s) {
     const q = (sel) => this.el.querySelector(sel);
@@ -104,6 +214,7 @@ export class Panel {
     lt.textContent = s.lastText || '';
     lt.hidden = !s.lastText;
     this.renderFiles();
+    this.renderCompose(s);
   }
 
   renderFiles() {

@@ -11,13 +11,34 @@
 <main id="stage">
   <canvas id="office" width="512" height="320"></canvas>
 </main>
+<dialog id="launcher">
+  <form id="l-form" method="dialog">
+    <h2>새 직원 채용</h2>
+    <label>워크트리
+      <select id="l-worktree" required><option value="">불러오는 중…</option></select>
+    </label>
+    <label>모델 <span class="dim">(비우면 기본값)</span>
+      <input id="l-model" list="l-models" placeholder="opus / sonnet / haiku / 모델 ID" autocomplete="off">
+      <datalist id="l-models"><option value="opus"><option value="sonnet"><option value="haiku"></datalist>
+    </label>
+    <label>첫 지시 <span class="dim">(선택)</span>
+      <textarea id="l-prompt" rows="5" placeholder="무엇을 할지 적어주세요. 비우면 빈 세션으로 시작합니다."></textarea>
+    </label>
+    <p id="l-msg" class="msg"></p>
+    <div class="row">
+      <button type="button" id="l-cancel">취소</button>
+      <button type="submit" id="l-submit" class="primary">시작</button>
+    </div>
+  </form>
+</dialog>
 <div id="tip" hidden></div>
 <div id="ticker"><ul id="ticker-list"></ul></div>
-<aside id="panel" hidden>
+<aside id="panel">
   <header>
     <div class="hd">
       <h2 id="p-name"></h2>
       <span id="p-state" class="badge"></span>
+      <button id="p-quit" type="button" title="이 세션 종료">퇴근</button>
     </div>
     <p id="p-title"></p>
     <button id="p-close" title="닫기 (Esc)">×</button>
@@ -32,6 +53,13 @@
     <h3>활동 로그</h3>
     <ul id="p-log"></ul>
   </div>
+  <form id="p-compose">
+    <textarea id="p-input" rows="2" placeholder="이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea>
+    <div class="row">
+      <span id="p-compose-msg" class="msg"></span>
+      <button type="submit" id="p-send" class="primary">보내기</button>
+    </div>
+  </form>
 </aside>
 <script type="module" src="office.js"></script>
 </body>

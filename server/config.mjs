@@ -11,6 +11,11 @@ export const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 export const DATA_DIR = process.env.AGENT_OFFICE_DATA || path.join(os.homedir(), '.agent-office');
 export const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
+// Native launcher, not orca.cmd: cmd.exe would reparse prompt text. On Linux bare `orca` is the screen reader.
+export const ORCA_BIN = process.env.AGENT_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
+  || (process.platform === 'win32' ? 'orca.exe' : process.platform === 'linux' ? 'orca-ide' : 'orca');
+export const MAX_PROMPT_CHARS = 20_000;
+
 export const WEB_DIR = path.resolve(import.meta.dirname, '../web');
 
 export const DESK_COUNT = 16;

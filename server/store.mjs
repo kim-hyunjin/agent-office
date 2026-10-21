@@ -115,6 +115,7 @@ export class Store {
       desk: this.assignDesk(id),
       permissionMode: null,
       transcriptPath: init.transcriptPath || null,
+      orcaTerminal: null,  // Orca terminal handle (from hook env) for sending prompts
       log: new RingBuffer(LOG_SIZE),
       subagents: new Map(),
     };
@@ -230,7 +231,7 @@ export class Store {
       lastText: s.lastText, lastTextAt: s.lastTextAt, lastPrompt: s.lastPrompt,
       lastThinking: s.lastThinking, lastThinkingAt: s.lastThinkingAt, turnStartedAt: s.turnStartedAt, turnTools: s.turnTools, cost: s.cost,
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, ended: s.ended, endedAt: s.endedAt,
-      desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents,
+      desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal,
       subagents: [...s.subagents.values()].map((a) => this.serializeSubagent(a)),
       log: s.log.last(logCount),
     };

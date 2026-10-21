@@ -374,4 +374,17 @@ function drawLegend(ctx, S, world) {
     ctx.fillStyle = '#f3f4f6'; ctx.fillText(labelOf(f), x + 8 * S + 3 * S, y0 + h / 2);
     x += itemW[i];
   });
+  drawNewButton(ctx, S, world, x0, y0, h);
 }
+
+/** "+ 새 직원" button just left of the legend. Its rect (office px) goes to world.newBtn for hit-testing. */
+function drawNewButton(ctx, S, world, legendX, y0, h) {
+  const label = '+ 새 직원';
+  const w = ctx.measureText(label).width + 8 * S;
+  const x = legendX - 3 * S - w;
+  const hover = world.hoverKey === NEW_BTN;
+  ctx.fillStyle = hover ? '#ffe08a' : 'rgba(255,209,102,0.92)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
+  ctx.fillStyle = '#1f2233'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y0 + h / 2); ctx.textAlign = 'left';
+  world.newBtn = { x: x / S, y: y0 / S, w: w / S, h: h / S };
+}
+export const NEW_BTN = '__new__';
