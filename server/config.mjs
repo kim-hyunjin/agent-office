@@ -20,7 +20,7 @@ export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (
 
 export const WEB_DIR = path.resolve(import.meta.dirname, '../web');
 
-export const DESK_COUNT = 16;
+export const DESK_COUNT = 12; // keep in sync with web/tilemap.js
 export const SEATS_PER_DESK = 3;
 export const LOG_SIZE = 100;
 export const SNAPSHOT_LOG = 30;

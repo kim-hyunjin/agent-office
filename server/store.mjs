@@ -59,7 +59,7 @@ export class Store {
     const used = this.usedDesks();
     const remembered = this.desks[sessionId];
     let desk;
-    if (remembered && !used.has(remembered.desk)) desk = remembered.desk;
+    if (remembered && remembered.desk < DESK_COUNT && !used.has(remembered.desk)) desk = remembered.desk; // layouts can shrink
     else { desk = 0; while (used.has(desk)) desk++; }
     this.desks[sessionId] = { ...remembered, desk, at: Date.now() };
     this.save();

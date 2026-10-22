@@ -67,11 +67,12 @@ export function familyOf(model) {
 }
 
 export function paletteFor(id, kind = 'employee', model = null) {
-  const h = hashStr(id);
   const fam = familyOf(model);
-  const coats = FAMILIES[fam].coats;
-  const variant = (h >>> 4) % coats.length;
-  return { fam, variant, kind, ...coats[variant], W: '#fdfdfd', L: '#c8d0d8', D: '#111' };
+  return coatPalette(fam, (hashStr(id) >>> 4) % FAMILIES[fam].coats.length, kind);
+}
+/** Palette for one specific coat variant of a family. */
+export function coatPalette(fam, variant, kind = 'employee') {
+  return { fam, variant, kind, ...FAMILIES[fam].coats[variant], W: '#fdfdfd', L: '#c8d0d8', D: '#111' };
 }
 
 // Adult cat. Seated poses are 8×10 facing the viewer; `walk` is a 12×8 side-on run cycle
@@ -115,6 +116,51 @@ const E = {
   sit: [[
     '........A.A', '........FFF', '..FSFSFFFEF', '.FFFFFFFFUN', 'TFFFFFFFFCC', '.TTTTTTPP..',
   ]],
+  // seen from behind (seated facing a desk or table): no face, stripes down the back, tail out to the side
+  back: [[
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FFSSFF.', 'RFFFFFFR', '.RFSSFR.', '.FFSSFF.', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ], [
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FFSSFF.', 'RFFFFFFR', '.RFSSFR.', '.FFSSFF.', '.FFFFFF.', 'T.FFFFF.', '.TFFFFF.',
+  ]],
+  backType: [[
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FFSSFF.', 'RFFFFFFR', '.RFSSFR.', 'PFFSSFF.', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ], [
+    '.A....A.', '.AA..AA.', '.FFSSFF.', '.FFSSFF.', 'RFFFFFFR', '.RFSSFR.', '.FFSSFFP', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ]],
+  backWait: [[
+    '.A....AP', '.AA..AAF', '.FFSSFFF', '.FFSSFFF', 'RFFFFFF.', '.RFSSFF.', '.FFSSFF.', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ], [
+    '.A....A.', '.AA..AAP', '.FFSSFFF', '.FFSSFFF', 'RFFFFFF.', '.RFSSFF.', '.FFSSFF.', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ]],
+  backPhone: [[
+    '.A....A.', '.AA..AA.', '.FFSSFFD', '.FFSSFFD', 'RFFFFFFP', '.RFSSFF.', '.FFSSFF.', '.FFFFFF.', '.FFFFFF.', 'TTFFFFF.',
+  ]],
+  // seated in profile facing right (flipped for the left-facing chair): head and paws toward the desk, tail behind
+  side: [[
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCC.', '..FFFFCC.', 'T.FFFFFF.', 'TTFFFFPP.',
+  ], [
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCC.', '..FFFFCC.', '.TFFFFFF.', 'TTFFFFPP.',
+  ]],
+  sideType: [[
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCCP', '..FFFFCC.', 'T.FFFFFF.', 'TTFFFFFP.',
+  ], [
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCC.', '..FFFFCCP', 'T.FFFFFF.', 'TTFFFFPF.',
+  ]],
+  sideRead: [[
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCCW', '..SFFFCPW', '..FFFFCCL', 'T.FFFFFF.', 'TTFFFFPP.',
+  ], [
+    '.....A.A.', '.....FAF.', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCCL', '..SFFFCPW', '..FFFFCCW', 'T.FFFFFF.', 'TTFFFFPP.',
+  ]],
+  sideWait: [[
+    '.....A.AP', '.....FAFF', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCC.', '..FFFFCC.', 'T.FFFFFF.', 'TTFFFFFP.',
+  ], [
+    '.....A.A.', '.....FAFP', '....FFFFF', '....FFFEF', '....FFFUN', '...SFFCC.', '..SFFFCC.', '..FFFFCC.', 'T.FFFFFF.', 'TTFFFFFP.',
+  ]],
+  sidePhone: [[ // handset on the cheek, paw holding it, eye still showing
+    '.....A.A.', '.....FAF.', '....FFDFF', '....FFDEF', '....FFPUN', '...SFPCC.', '..SFFFCC.', '..FFFFCC.', 'T.FFFFFF.', 'TTFFFFFP.',
+  ], [
+    '.....A.A.', '.....FAF.', '....FFDFF', '....FFDEF', '....FFPUN', '...SFPCC.', '..SFFFCC.', '..FFFFCC.', '.TFFFFFF.', 'TTFFFFFP.',
+  ]],
 };
 
 // Kitten (subagent): seated 6×8, running 9×6.
@@ -153,7 +199,25 @@ const A = {
   sit: [[
     '......A.A', '......FFF', '.FSFSFFEF', 'TFFFFFFUN', '.TTTTPP..',
   ]],
+  back: [[
+    'A....A', 'AFSSFA', 'FFSSFF', 'FFFFFF', '.FSSF.', '.FFFF.', '.FFFF.', 'TFFFF.',
+  ]],
+  backType: [[
+    'A....A', 'AFSSFA', 'FFSSFF', 'FFFFFF', '.FSSF.', 'PFFFF.', '.FFFF.', 'TFFFF.',
+  ], [
+    'A....A', 'AFSSFA', 'FFSSFF', 'FFFFFF', '.FSSF.', '.FFFFP', '.FFFF.', 'TFFFF.',
+  ]],
 };
+
+E.bat = [E.idle[0], E.wait[0]]; // paw down, paw up: batting at a toy
+// up on its hind legs facing right, front paws on a scratching post at the right edge, raking down
+E.scratch = [[
+  '....A.A...', '....FFF...', '...FFEF...', '...FFFUN..', '..SFFFFFFP', '..SFFCC...',
+  '..FFFCC...', '..FFFCFFFP', '..FFFFF...', '..FF.FF...', '.TPP.PP...', 'TT........',
+], [
+  '....A.A...', '....FFF...', '...FFEF...', '...FFFUN..', '..SFFFF...', '..SFFCFFFP',
+  '..FFFCC...', '..FFFCC...', '..FFFFFFFP', '..FF.FF...', '.TPP.PP...', 'TT........',
+]];
 
 export const SHEETS = { employee: E, assistant: A };
 
@@ -207,6 +271,27 @@ export function outline(img, color) {
   byColor.set(color, c);
   return c;
 }
+
+const BACK = { idle: 'back', type: 'backType', read: 'back', write: 'back', wait: 'backWait', phone: 'backPhone' };
+/** The seen-from-behind variant of a seated animation, if the sheet has one (kittens only have back / backType). */
+export function backAnim(kind, anim) {
+  const b = BACK[anim];
+  const sheet = SHEETS[kind] || E;
+  return b && sheet[b] ? b : sheet.back ? 'back' : anim;
+}
+
+const SIDE = { idle: 'side', type: 'sideType', read: 'sideRead', write: 'side', wait: 'sideWait', phone: 'sidePhone' };
+/** The seated-in-profile variant (facing right) of an animation, if the sheet has one. */
+export function sideAnim(kind, anim) {
+  const s = SIDE[anim];
+  return s && (SHEETS[kind] || E)[s] ? s : anim;
+}
+
+/** The lobby's resident receptionist: a Bengal (gold, dark markings), a coat no model family uses. */
+export const RECEPTIONIST_PAL = {
+  fam: 'reception', variant: 0, kind: 'employee', W: '#fdfdfd', L: '#c8d0d8', D: '#111',
+  F: '#d9a441', S: '#5a3a1a', A: '#7a4a1e', T: '#7a4a1e', C: '#f3dfb0', U: '#f3dfb0', P: '#5a3a1a', N: '#c0505a', E: '#4fb06b', R: null,
+};
 
 /** Map an entity state to a sprite animation name. */
 export function animFor(state, moving, station = null) {
