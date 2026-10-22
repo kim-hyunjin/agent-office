@@ -386,6 +386,8 @@ export class Editor {
     $('ed-sel').addEventListener('click', (ev) => { if (ev.target.dataset.f === 'remove') this.removeSelected(); });
     $('ed-undo').addEventListener('click', () => this.undoOnce());
     $('ed-reset').addEventListener('click', () => { this.change((d) => Object.assign(d, cloneOffice(DEFAULT_OFFICE))); this.sel = null; this.syncPanel(); });
+    // empty floor to start over: size and front door stay; one undo step brings it all back
+    $('ed-clear').addEventListener('click', () => { this.change((d) => { d.rooms = []; d.items = []; }); this.sel = null; this.syncPanel(); });
     $('ed-cancel').addEventListener('click', () => this.close());
     $('ed-close').addEventListener('click', () => this.close());
     $('ed-save').addEventListener('click', () => this.save());
