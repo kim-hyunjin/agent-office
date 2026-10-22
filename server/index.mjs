@@ -143,6 +143,16 @@ const server = http.createServer(async (req, res) => {
       try { json(res, 200, { worktrees: await listWorktrees() }); } catch (e) { orcaError(res, e); }
       return;
     }
+    if (req.method === 'POST' && p === '/settings/together') {
+      const data = await readJson(req, res);
+      if (!data) return;
+      const id = data.officeId == null ? null : String(data.officeId);
+      if (id !== null && !store.office(id)) { json(res, 404, { error: '사무실이 없습니다.' }); return; }
+      store.setTogether(id);
+      console.log(`[web] ${id ? `everyone works in ${store.office(id).name}` : 'back to one office per repo'}`);
+      json(res, 200, { ok: true });
+      return;
+    }
     // offices: POST /offices/:id/layout {layout} · POST /offices/:id/reset · POST /offices/:id {name} · DELETE /offices/:id
     const om = p.match(/^\/offices\/([^/]+)(\/layout|\/reset)?$/);
     if (om && (req.method === 'POST' || req.method === 'DELETE')) {

@@ -21,6 +21,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #tabs .n { font-size: 11px; padding: 0 6px; border-radius: 8px; background: rgba(255,255,255,0.08); }
 #tabs .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
 #tabs .dot.wait { background: #fbbf24; }
+#tabs button.act { margin-left: 6px; border-style: dashed; background: transparent; }
+#tabs button.act:hover { background: var(--panel-2); }
+#tabs button.act:disabled { opacity: .5; cursor: wait; }
 #office { image-rendering: pixelated; image-rendering: crisp-edges; background: #000; box-shadow: 0 0 0 2px #2a2d45, 0 20px 60px rgba(0,0,0,0.5); }
 
 #tip {

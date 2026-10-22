@@ -50,6 +50,7 @@ const dwellMs = (act) => (act === 'nap' || act === 'lounge' ? 20000 + Math.rando
 const world = {
   offices: [],         // [{ id, name, repos, layout }] from the server, one per repo
   officeId: null,      // the office on screen; only its sessions get cats
+  together: null,      // office everyone works in regardless of repo (server setting), or null
   layoutJson: '',      // its layout as last applied, to spot changes
   geo: null,           // compiled layout (layout.js) of the office on screen
   bg: null,
@@ -277,24 +278,26 @@ function feedFrom(s) {
     const key = `${s.id}|${e.t}|${e.ev}|${e.tool || ''}|${e.target || ''}`;
     if (feed.seen.has(key)) continue;
     feed.seen.add(key);
-    feed.items.push({ key, t: e.t, officeId: s.officeId, name: s.name, agent: /^\[/.test(e.text || ''), e });
+    feed.items.push({ key, t: e.t, sid: s.id, officeId: s.officeId, name: s.name, agent: /^\[/.test(e.text || ''), e });
     added = true;
   }
   if (!added) return;
   feed.items.sort((a, b) => b.t - a.t);
   const per = new Map();
   feed.items = feed.items.filter((it) => {
-    const n = (per.get(it.officeId) || 0) + 1;
-    per.set(it.officeId, n);
+    const o = feedOffice(it), n = (per.get(o) || 0) + 1;
+    per.set(o, n);
     return n <= FEED_MAX;
   });
   if (s.officeId === world.officeId) renderFeed(true);
 }
 /** Redraw the ticker with the current office's items; `live` = new items arrived (animate, keep the scroll anchored). */
+/** Sessions move between offices (gathering in one, splitting up): an item follows its session's current office. */
+const feedOffice = (it) => world.sessions.get(it.sid)?.officeId ?? it.officeId;
 function renderFeed(live) {
   const ul = document.getElementById('ticker-list');
   const box = ul.parentElement;
-  const items = feed.items.filter((it) => it.officeId === world.officeId);
+  const items = feed.items.filter((it) => feedOffice(it) === world.officeId);
   // keep the viewport anchored when the user has scrolled back into history
   const prevTop = box.scrollTop, prevH = box.scrollHeight;
   const newest = live ? items[0]?.key : null;
@@ -316,8 +319,10 @@ function renderFeed(live) {
 const here = (s) => s.officeId === world.officeId;
 function upsertSession(s, seated = false) {
   const now = Date.now();
+  const moved = world.sessions.has(s.id) && world.sessions.get(s.id).officeId !== s.officeId;
   world.sessions.set(s.id, s);
   feedFrom(s);
+  if (moved) renderFeed(false); // its history comes along to (or leaves) the office on screen
   if (!here(s)) { // works in another office: no cat here
     dropCats(s.id);
     panel.update(s);
@@ -375,8 +380,10 @@ function removeSession(id) {
 const OFFICE_KEY = 'pawgents-office:office';
 const officeOf = (id) => world.offices.find((o) => o.id === id);
 /** Server list changed: keep the current office (or pick one), re-lay it out if its layout changed, redraw the tabs. */
-function setOffices(list) {
+function setOffices(list, together = null) {
   world.offices = list;
+  world.together = officeOf(together) ? together : null;
+  if (world.together && world.officeId !== world.together) { editor.close(); switchOffice(world.together); return; }
   const cur = officeOf(world.officeId);
   if (!cur) { switchOffice(preferredOffice()); return; }
   if (JSON.stringify(cur.layout) !== world.layoutJson) { world.layoutJson = JSON.stringify(cur.layout); applyLayout(cur.layout); }
@@ -406,25 +413,41 @@ function switchOffice(id) {
   roster.update(world);
   renderTabs();
 }
-/** Tabs above the office, one per office, with head count and a dot when someone works (yellow: waiting on you). Hidden with one office. */
+/**
+ * Tabs above the office, one per office, with head count and a dot when someone works (yellow: waiting on you),
+ * and a button to gather everyone here / split up again. Gathered: only the shared office's tab. Hidden with one office.
+ */
 function renderTabs() {
-  const hidden = world.offices.length < 2;
+  const hidden = world.offices.length < 2 && !world.together;
   if (tabsEl.hidden !== hidden) { tabsEl.hidden = hidden; tabsEl.dataset.html = ''; if (hidden) resize(); }
   if (hidden) return;
   const shown = !tabsEl.dataset.html; // first fill: the office shrinks to make room
-  const html = world.offices.map((o) => {
+  const offices = world.together ? world.offices.filter((o) => o.id === world.together) : world.offices;
+  const html = offices.map((o) => {
     const staff = [...world.sessions.values()].filter((s) => !s.ended && s.officeId === o.id);
     const dot = staff.some((s) => s.state === 'waiting') ? '<i class="dot wait"></i>' : staff.some((s) => s.state !== 'idle') ? '<i class="dot"></i>' : '';
     const title = o.repos.filter((r) => r !== 'default').join('\n') || '저장소 밖에서 일하는 세션';
     return `<button type="button" data-id="${esc(o.id)}" class="${o.id === world.officeId ? 'on' : ''}" title="${esc(title)}">${esc(o.name)}<span class="n">${staff.length}</span>${dot}</button>`;
-  }).join('');
+  }).join('') + (world.together
+    ? '<button type="button" class="act" data-act="split" title="저장소마다 각자의 사무실로 돌아갑니다">↔ 저장소별로 나누기</button>'
+    : '<button type="button" class="act" data-act="gather" title="모든 세션이 지금 보고 있는 사무실에 모여서 일합니다">⇢ 이 사무실에 모두 모이기</button>');
   if (html !== tabsEl.dataset.html) { tabsEl.innerHTML = html; tabsEl.dataset.html = html; }
   if (shown) resize();
 }
 tabsEl.addEventListener('click', (ev) => {
+  const act = ev.target.closest('button[data-act]');
+  if (act) { setTogether(act.dataset.act === 'gather' ? world.officeId : null, act); return; }
   const b = ev.target.closest('button[data-id]');
   if (b && b.dataset.id !== world.officeId) { editor.close(); switchOffice(b.dataset.id); }
 });
+/** Gather everyone in one office (null: split up by repo). The server moves the staff and pushes the result. */
+async function setTogether(officeId, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch('/settings/together', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ officeId }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  } catch (e) { btn.title = `실패: ${e.message}`; } finally { btn.disabled = false; }
+}
 let firstSnapshot = true;
 /** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
 function applyCatChoices(cats) {
@@ -446,8 +469,8 @@ function applySnapshot(snap) {
   const m = seated && location.hash.match(/^#s=([^&]+)/);
   const picked = m && snap.sessions.find((x) => x.id.startsWith(decodeURIComponent(m[1])));
   world.offices = snap.offices;
-  if (picked && officeOf(picked.officeId)) switchOffice(picked.officeId);
-  else setOffices(snap.offices);
+  if (picked && officeOf(picked.officeId)) { world.together = officeOf(snap.together) ? snap.together : null; switchOffice(picked.officeId); }
+  else setOffices(snap.offices, snap.together);
   const ids = new Set();
   for (const s of snap.sessions) { ids.add(s.id); upsertSession(s, seated && !s.ended); }
   for (const id of [...world.sessions.keys()]) if (!ids.has(id)) removeSession(id);
@@ -477,7 +500,7 @@ function connect() {
   es.addEventListener('session', (ev) => upsertSession(JSON.parse(ev.data)));
   es.addEventListener('remove', (ev) => removeSession(JSON.parse(ev.data).id));
   es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data).cats));
-  es.addEventListener('offices', (ev) => setOffices(JSON.parse(ev.data).offices));
+  es.addEventListener('offices', (ev) => { const d = JSON.parse(ev.data); setOffices(d.offices, d.together); });
   es.onopen = () => {
     world.connected = true;
     if (everConnected) fetch('/state').then((r) => r.json()).then(applySnapshot).catch(() => {});

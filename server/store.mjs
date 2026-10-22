@@ -29,6 +29,7 @@ export class Store {
     this.desks = {};           // sessionId -> { desk, office, at, terminal? }
     this.offices = [newOffice(DEFAULT_OFFICE_ID, '사무실', ['default'])]; // one per repo; repos: repo keys that work there
     this.cats = {};            // model family -> breed key the user picked (absent = default breed)
+    this.together = null;      // office id everyone works in regardless of repo, or null: each repo in its own office
     this.stateFile = stateFile;
     this.listeners = new Set();
     this.save = debounce(() => this.saveNow(), 500);
@@ -52,11 +53,12 @@ export class Store {
     }
     if (!offices.some((o) => o.id === DEFAULT_OFFICE_ID)) offices.unshift(newOffice(DEFAULT_OFFICE_ID, '사무실', ['default']));
     this.offices = offices;
+    this.together = offices.some((o) => o.id === data?.together) ? data.together : null;
   }
   saveNow() {
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, offices: this.offices, updatedAt: Date.now() }, null, 2));
+      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, offices: this.offices, together: this.together, updatedAt: Date.now() }, null, 2));
     } catch (e) {
       console.error('[store] save failed:', e.message);
     }
@@ -77,7 +79,7 @@ export class Store {
 
   // ---- offices --------------------------------------------------------------
   office(id) { return this.offices.find((o) => o.id === id); }
-  emitOffices() { this.emit('offices', { offices: this.offices }); }
+  emitOffices() { this.emit('offices', { offices: this.offices, together: this.together }); }
   /** The office a working directory belongs to: its repo's, created (with the default layout) the first time. */
   officeFor(cwd) {
     const repo = repoOf(cwd);
@@ -90,9 +92,10 @@ export class Store {
     }
     return o.id;
   }
-  /** Send a session to its repo's office (cwd can arrive after the session); a move gets it a desk there. */
+  /** Send a session to its repo's office, or the shared one (cwd can arrive after the session); a move gets it a desk there. */
   placeSession(s) {
-    const id = this.officeFor(s.cwd);
+    const own = this.officeFor(s.cwd); // created even while together, so splitting up later has somewhere to go
+    const id = this.together ?? own;
     if (s.officeId === id) return false;
     s.officeId = id;
     if (!s.ended) s.desk = this.assignDesk(s.id, id);
@@ -103,6 +106,13 @@ export class Store {
     s.cwd = cwd;
     this.placeSession(s);
     return true;
+  }
+  /** Gather everyone in one office (null: back to their repos' offices), moving the staff right away. */
+  setTogether(officeId) {
+    this.together = officeId;
+    for (const s of this.sessions.values()) if (this.placeSession(s)) this.emitSession(s);
+    this.save();
+    this.emitOffices();
   }
   /** Sessions in an office whose desk is gone (layout shrank) get a free one, if any. */
   reseat(officeId) {
@@ -130,6 +140,7 @@ export class Store {
     const o = this.office(officeId), home = this.office(DEFAULT_OFFICE_ID);
     home.repos.push(...o.repos.filter((r) => !home.repos.includes(r)));
     this.offices = this.offices.filter((x) => x !== o);
+    if (this.together === officeId) this.together = DEFAULT_OFFICE_ID;
     for (const s of this.sessions.values()) {
       if (s.officeId !== officeId) continue;
       s.officeId = DEFAULT_OFFICE_ID;
@@ -341,6 +352,7 @@ export class Store {
     return {
       now: Date.now(),
       offices: this.offices,
+      together: this.together,
       seatsPerDesk: SEATS_PER_DESK,
       cats: this.cats,
       sessions: [...this.sessions.values()].map((s) => this.serializeSession(s)),
