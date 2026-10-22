@@ -29,7 +29,7 @@ export function pollRegistry(store) {
     let changed = !existed || wasEnded;
     if (s.pid !== d.pid) { s.pid = d.pid; changed = true; }
     if (d.name && s.name !== d.name) { s.name = d.name; s.nameSource = 'registry'; changed = true; }
-    if (d.cwd && s.cwd !== d.cwd) { s.cwd = d.cwd; changed = true; }
+    if (store.setCwd(s, d.cwd)) changed = true;
     if (d.startedAt && d.startedAt < s.startedAt) { s.startedAt = d.startedAt; changed = true; }
     if (!s.transcriptPath && d.cwd) {
       s.transcriptPath = path.join(PROJECTS_DIR, projectDirName(d.cwd), `${id}.jsonl`);

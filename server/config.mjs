@@ -1,6 +1,5 @@
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_OFFICE, deskCount } from '../web/layout.js';
 
 export const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || process.env.PORT || 17777);
 export const HOST = '127.0.0.1';
@@ -21,7 +20,6 @@ export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (
 
 export const WEB_DIR = path.resolve(import.meta.dirname, '../web');
 
-export const DESK_COUNT = deskCount(DEFAULT_OFFICE);
 export const SEATS_PER_DESK = 3;
 export const LOG_SIZE = 100;
 export const SNAPSHOT_LOG = 30;

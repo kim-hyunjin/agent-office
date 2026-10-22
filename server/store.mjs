@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  DESK_COUNT, SEATS_PER_DESK, LOG_SIZE, SNAPSHOT_LOG, DESK_MEMORY_MS,
+  SEATS_PER_DESK, LOG_SIZE, SNAPSHOT_LOG, DESK_MEMORY_MS,
   SUBAGENT_TTL_MS, SUBAGENT_STALE_MS, SESSION_TTL_MS, ORPHAN_SESSION_MS, STATE_FILE,
 } from './config.mjs';
 import { debounce, safeJsonParse } from './util.mjs';
+import { repoOf } from './repo.mjs';
+import { DEFAULT_OFFICE, cloneOffice, deskCount, normalize, validate } from '../web/layout.js';
 
 export class RingBuffer {
   constructor(n) { this.n = n; this.buf = []; }
@@ -18,11 +20,14 @@ const BUSY_STATES = new Set(['thinking', 'reading', 'coding', 'terminal', 'searc
 export const isBusyState = (s) => BUSY_STATES.has(s);
 export const CAT_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku', 'other'];
 export const BREED_KEY = /^[a-z]{2,24}$/; // the breed list itself lives in web/sprites.js
+export const DEFAULT_OFFICE_ID = 'default';
+const newOffice = (id, name, repos, layout = cloneOffice(DEFAULT_OFFICE)) => ({ id, name, repos, layout });
 
 export class Store {
   constructor({ stateFile = STATE_FILE } = {}) {
     this.sessions = new Map();
-    this.desks = {};           // sessionId -> { desk, at, terminal? }
+    this.desks = {};           // sessionId -> { desk, office, at, terminal? }
+    this.offices = [newOffice(DEFAULT_OFFICE_ID, '사무실', ['default'])]; // one per repo; repos: repo keys that work there
     this.cats = {};            // model family -> breed key the user picked (absent = default breed)
     this.stateFile = stateFile;
     this.listeners = new Set();
@@ -39,11 +44,19 @@ export class Store {
     }
     this.cats = {};
     for (const [fam, breed] of Object.entries(data?.cats || {})) if (CAT_FAMILIES.includes(fam) && BREED_KEY.test(breed)) this.cats[fam] = breed;
+    const offices = [];
+    for (const o of Array.isArray(data?.offices) ? data.offices : []) {
+      if (typeof o?.id !== 'string' || offices.some((x) => x.id === o.id) || !Array.isArray(o.repos)) continue;
+      const layout = validate(normalize(o.layout)).length ? cloneOffice(DEFAULT_OFFICE) : normalize(o.layout); // a broken layout falls back to the default
+      offices.push(newOffice(o.id, String(o.name || '사무실'), o.repos.filter((r) => typeof r === 'string'), layout));
+    }
+    if (!offices.some((o) => o.id === DEFAULT_OFFICE_ID)) offices.unshift(newOffice(DEFAULT_OFFICE_ID, '사무실', ['default']));
+    this.offices = offices;
   }
   saveNow() {
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, updatedAt: Date.now() }, null, 2));
+      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, offices: this.offices, updatedAt: Date.now() }, null, 2));
     } catch (e) {
       console.error('[store] save failed:', e.message);
     }
@@ -62,19 +75,81 @@ export class Store {
     this.emit('settings', { cats: this.cats });
   }
 
-  // ---- desks ---------------------------------------------------------------
-  usedDesks() {
-    const used = new Set();
-    for (const s of this.sessions.values()) if (!s.ended) used.add(s.desk);
-    return used;
+  // ---- offices --------------------------------------------------------------
+  office(id) { return this.offices.find((o) => o.id === id); }
+  emitOffices() { this.emit('offices', { offices: this.offices }); }
+  /** The office a working directory belongs to: its repo's, created (with the default layout) the first time. */
+  officeFor(cwd) {
+    const repo = repoOf(cwd);
+    let o = this.offices.find((x) => x.repos.includes(repo.key));
+    if (!o) {
+      o = newOffice(`o${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, repo.name || '사무실', [repo.key]);
+      this.offices.push(o);
+      this.save();
+      this.emitOffices();
+    }
+    return o.id;
   }
-  assignDesk(sessionId) {
-    const used = this.usedDesks();
+  /** Send a session to its repo's office (cwd can arrive after the session); a move gets it a desk there. */
+  placeSession(s) {
+    const id = this.officeFor(s.cwd);
+    if (s.officeId === id) return false;
+    s.officeId = id;
+    if (!s.ended) s.desk = this.assignDesk(s.id, id);
+    return true;
+  }
+  setCwd(s, cwd) {
+    if (!cwd || s.cwd === cwd) return false;
+    s.cwd = cwd;
+    this.placeSession(s);
+    return true;
+  }
+  /** Sessions in an office whose desk is gone (layout shrank) get a free one, if any. */
+  reseat(officeId) {
+    const n = deskCount(this.office(officeId).layout);
+    for (const s of this.sessions.values()) {
+      if (s.ended || s.officeId !== officeId || s.desk < n) continue;
+      s.desk = this.assignDesk(s.id, officeId);
+      this.emitSession(s);
+    }
+  }
+  setLayout(officeId, layout) {
+    const o = this.office(officeId);
+    o.layout = layout;
+    this.reseat(officeId);
+    this.save();
+    this.emitOffices();
+  }
+  renameOffice(officeId, name) {
+    this.office(officeId).name = name;
+    this.save();
+    this.emitOffices();
+  }
+  /** Close an office: its repos and staff move to the default office. */
+  deleteOffice(officeId) {
+    const o = this.office(officeId), home = this.office(DEFAULT_OFFICE_ID);
+    home.repos.push(...o.repos.filter((r) => !home.repos.includes(r)));
+    this.offices = this.offices.filter((x) => x !== o);
+    for (const s of this.sessions.values()) {
+      if (s.officeId !== officeId) continue;
+      s.officeId = DEFAULT_OFFICE_ID;
+      if (!s.ended) s.desk = this.assignDesk(s.id, DEFAULT_OFFICE_ID);
+      this.emitSession(s);
+    }
+    this.save();
+    this.emitOffices();
+  }
+
+  // ---- desks ---------------------------------------------------------------
+  assignDesk(sessionId, officeId) {
+    const used = new Set();
+    for (const s of this.sessions.values()) if (!s.ended && s.id !== sessionId && s.officeId === officeId) used.add(s.desk);
+    const n = deskCount(this.office(officeId).layout);
     const remembered = this.desks[sessionId];
     let desk;
-    if (remembered && remembered.desk < DESK_COUNT && !used.has(remembered.desk)) desk = remembered.desk; // layouts can shrink
-    else { desk = 0; while (used.has(desk)) desk++; }
-    this.desks[sessionId] = { ...remembered, desk, at: Date.now() };
+    if (remembered && (remembered.office ?? DEFAULT_OFFICE_ID) === officeId && remembered.desk < n && !used.has(remembered.desk)) desk = remembered.desk; // layouts can shrink
+    else { desk = 0; while (used.has(desk)) desk++; } // past the last desk: standing in the lobby
+    this.desks[sessionId] = { ...remembered, desk, office: officeId, at: Date.now() };
     this.save();
     return desk;
   }
@@ -102,7 +177,7 @@ export class Store {
     let s = this.sessions.get(id);
     if (s) {
       if (s.ended) this.revive(s);
-      if (init.cwd && !s.cwd) { s.cwd = init.cwd; if (!s.nameSource) s.name = path.basename(init.cwd) || s.name; }
+      if (init.cwd && !s.cwd) { this.setCwd(s, init.cwd); if (!s.nameSource) s.name = path.basename(init.cwd) || s.name; }
       if (init.transcriptPath && !s.transcriptPath) s.transcriptPath = init.transcriptPath;
       return s;
     }
@@ -135,7 +210,8 @@ export class Store {
       hookEvents: 0,
       ended: false,
       endedAt: null,
-      desk: this.assignDesk(id),
+      officeId: null,
+      desk: null,
       permissionMode: null,
       transcriptPath: init.transcriptPath || null,
       orcaTerminal: this.desks[id]?.terminal || null, // Orca terminal handle (hook env or resolved) for sending prompts
@@ -143,6 +219,7 @@ export class Store {
       subagents: new Map(),
     };
     this.sessions.set(id, s);
+    this.placeSession(s);
     return s;
   }
   revive(s) {
@@ -150,7 +227,7 @@ export class Store {
     s.endedAt = null;
     s.state = 'idle';
     s.stateSince = Date.now();
-    s.desk = this.assignDesk(s.id);
+    s.desk = this.assignDesk(s.id, s.officeId);
   }
   endSession(s, reason = 'ended') {
     if (s.ended) return;
@@ -255,7 +332,7 @@ export class Store {
       lastText: s.lastText, lastTextAt: s.lastTextAt, lastPrompt: s.lastPrompt,
       lastThinking: s.lastThinking, lastThinkingAt: s.lastThinkingAt, turnStartedAt: s.turnStartedAt, turnTools: s.turnTools, cost: s.cost,
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, ended: s.ended, endedAt: s.endedAt,
-      desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
+      officeId: s.officeId, desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
       subagents: [...s.subagents.values()].map((a) => this.serializeSubagent(a)),
       log: s.log.last(logCount),
     };
@@ -263,7 +340,7 @@ export class Store {
   snapshot() {
     return {
       now: Date.now(),
-      deskCount: DESK_COUNT,
+      offices: this.offices,
       seatsPerDesk: SEATS_PER_DESK,
       cats: this.cats,
       sessions: [...this.sessions.values()].map((s) => this.serializeSession(s)),

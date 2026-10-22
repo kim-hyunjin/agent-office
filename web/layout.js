@@ -81,6 +81,19 @@ export const DEFAULT_OFFICE = {
 };
 
 export const cloneOffice = (o) => JSON.parse(JSON.stringify(o));
+/** Only the fields a layout has (anything else from a client is dropped). Validate the result. */
+export function normalize(o) {
+  if (!o || typeof o !== 'object') return null;
+  const pick = (src, keys) => Object.fromEntries(keys.filter((k) => src?.[k] !== undefined).map((k) => [k, src[k]]));
+  return {
+    v: LAYOUT_VERSION, w: o.w, h: o.h, door: { x: o.door?.x },
+    rooms: Array.isArray(o.rooms) ? o.rooms.map((r) => ({
+      ...pick(r, ['id', 'type', 'name', 'x', 'y', 'w', 'h', 'glass', 'walls']),
+      doors: Array.isArray(r?.doors) ? r.doors.map((d) => ({ x: d?.x, y: d?.y, ...(d?.open ? { open: true } : {}) })) : r?.doors,
+    })) : o.rooms,
+    items: Array.isArray(o.items) ? o.items.map((it) => pick(it, ['id', 'kind', 'x', 'y'])) : o.items,
+  };
+}
 const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;

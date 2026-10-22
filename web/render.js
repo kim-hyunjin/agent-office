@@ -330,7 +330,7 @@ function drawHUD(ctx, S, world, now) {
   const { sessions, connected } = world;
   let emp = 0, asst = 0, busy = 0;
   for (const s of sessions.values()) {
-    if (s.ended) continue;
+    if (s.ended || s.officeId !== world.officeId) continue; // this office only
     emp++;
     if (s.state !== 'idle') busy++;
     for (const a of s.subagents) if (!a.ended) asst++;

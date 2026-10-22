@@ -78,6 +78,10 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 
 이름·상태 글자는 화면에 띄우지 않습니다. 고양이에 마우스를 올리면 툴팁, 클릭하면 상세 패널이 열립니다. 왼쪽 위 상태 표시의 "목록 ▾"를 누르면 직원 목록이 열려, 모두의 상태·위치를 한눈에 보고 줄을 눌러 상세 패널로 가거나 **퇴근** 버튼(두 번 눌러 확인)으로 세션을 끝낼 수 있습니다. 로비 카운터의 헤드셋 쓴 벵갈 고양이는 상주 안내원으로, 세션과 무관한 장식입니다. 오른쪽 아래 "모델 안내" 버튼을 누르면 모델별 품종·직급·모니터와 현재 인원을 보여주고, 모델마다 품종을 고를 수 있습니다.
 
+## 여러 사무실
+
+세션은 작업 폴더의 git 저장소별로 다른 사무실에 출근합니다. 워크트리는 원본 저장소와 같은 사무실이고, 저장소 밖에서 일하는 세션은 기본 사무실("사무실")로 갑니다. 처음 보는 저장소면 기본 배치로 사무실이 새로 생기고, 사무실이 둘 이상이면 화면 위에 탭이 나타나 인원 수와 상태(초록: 일하는 중, 노랑: 응답 대기)를 보여줍니다. 직원 목록에는 모든 사무실의 직원이 나오고, 다른 사무실 직원을 누르면 그 사무실로 넘어갑니다. 사무실과 책상 배정은 `~/.pawgents-office/state.json`에 저장됩니다.
+
 ## 상태 (툴 → 모니터·소품)
 
 | 상태 | 트리거 | 연출 |
@@ -161,7 +165,7 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 ## 구조
 
 ```
-server/   index.mjs(HTTP/SSE) · reducer.mjs(이벤트→상태) · store.mjs(모델/책상/영속화)
+server/   index.mjs(HTTP/SSE) · reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
 web/      office.js(진입점) · render.js · sprites.js · layout.js(배치 데이터·검증) · tilemap.js(배경 그리기)
           panel.js · launcher.js(새 직원)

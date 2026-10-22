@@ -3,7 +3,8 @@ import http from 'node:http';
 import {
   PORT, HOST, MAX_BODY_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR,
 } from './config.mjs';
-import { Store, CAT_FAMILIES, BREED_KEY } from './store.mjs';
+import { Store, CAT_FAMILIES, BREED_KEY, DEFAULT_OFFICE_ID } from './store.mjs';
+import { DEFAULT_OFFICE, cloneOffice, normalize, validate } from '../web/layout.js';
 import { applyHook } from './reducer.mjs';
 import { Sse } from './sse.mjs';
 import { serveStatic } from './static.mjs';
@@ -140,6 +141,32 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/orca/worktrees') {
       try { json(res, 200, { worktrees: await listWorktrees() }); } catch (e) { orcaError(res, e); }
+      return;
+    }
+    // offices: POST /offices/:id/layout {layout} · POST /offices/:id/reset · POST /offices/:id {name} · DELETE /offices/:id
+    const om = p.match(/^\/offices\/([^/]+)(\/layout|\/reset)?$/);
+    if (om && (req.method === 'POST' || req.method === 'DELETE')) {
+      const id = decodeURIComponent(om[1]), office = store.office(id);
+      const data = await readJson(req, res);
+      if (!data) return;
+      if (!office) { json(res, 404, { error: '사무실이 없습니다.' }); return; }
+      if (req.method === 'DELETE') {
+        if (om[2] || id === DEFAULT_OFFICE_ID) { json(res, 400, { error: '기본 사무실은 닫을 수 없습니다.' }); return; }
+        store.deleteOffice(id);
+        console.log(`[web] office closed: ${office.name}`);
+      } else if (om[2] === '/layout') {
+        const layout = normalize(data.layout), errs = validate(layout);
+        if (errs.length) { json(res, 400, { error: errs.map((e) => e.msg).join(' / ') }); return; }
+        store.setLayout(id, layout);
+        console.log(`[web] layout saved: ${office.name}`);
+      } else if (om[2] === '/reset') {
+        store.setLayout(id, cloneOffice(DEFAULT_OFFICE));
+      } else {
+        const name = String(data.name ?? '').trim();
+        if (!name || name.length > 30) { json(res, 400, { error: '사무실 이름은 1–30자여야 합니다.' }); return; }
+        store.renameOffice(id, name);
+      }
+      json(res, 200, { ok: true });
       return;
     }
     if (req.method === 'POST' && p === '/settings/cats') {

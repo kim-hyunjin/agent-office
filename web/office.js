@@ -14,11 +14,12 @@ const MEETING_LINGER_MS = 8000; // keep the meeting room this long after the las
 const LIBRARY_LINGER_MS = 10000; // stay at the bookshelf this long after the last search, so back-to-back searches don't bounce
 
 const canvas = document.getElementById('office');
+const tabsEl = document.getElementById('tabs');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const panel = new Panel(document.getElementById('panel'), {
   onOpen: () => refit(),
-  onClose: () => { world.selectedKey = null; history.replaceState(null, '', location.pathname); refit(); },
+  onClose: () => { world.selectedKey = null; history.replaceState(null, '', location.pathname + location.search); refit(); },
 });
 
 /** Sticky slot allocator: a key keeps its slot until released. */
@@ -46,6 +47,9 @@ class Slots {
 const dwellMs = (act) => (act === 'nap' || act === 'lounge' ? 20000 + Math.random() * 20000 : 7000 + Math.random() * 8000);
 
 const world = {
+  offices: [],         // [{ id, name, repos, layout }] from the server, one per repo
+  officeId: null,      // the office on screen; only its sessions get cats
+  layoutJson: '',      // its layout as last applied, to spot changes
   geo: null,           // compiled layout (layout.js) of the office on screen
   bg: null,
   sessions: new Map(), // id -> server session object
@@ -96,7 +100,7 @@ const panelRoom = () => (panel.isOpen && window.innerWidth >= PANEL_W * 2 ? PANE
 function fitScale() {
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
-  const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight);
+  const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - (tabsEl.hidden ? 0 : tabsEl.offsetHeight);
   // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
   return clamp(Math.floor(Math.min(availW / world.geo.W, availH / world.geo.VIEW_H) * 20) / 20, 1, 8);
 }
@@ -293,10 +297,18 @@ function feedFrom(s) {
   if (prevTop > 0) box.scrollTop = prevTop + (box.scrollHeight - prevH);
 }
 
+const here = (s) => s.officeId === world.officeId;
 function upsertSession(s, seated = false) {
   const now = Date.now();
   world.sessions.set(s.id, s);
   feedFrom(s);
+  if (!here(s)) { // works in another office: no cat here
+    dropCats(s.id);
+    panel.update(s);
+    roster.update(world);
+    renderTabs();
+    return;
+  }
   let e = world.ents.get(s.id);
   if (!e) { if (!s.ended) e = spawnEmployee(s, seated, now); }
   else {
@@ -324,6 +336,11 @@ function upsertSession(s, seated = false) {
   }
   panel.update(s);
   roster.update(world);
+  renderTabs();
+}
+/** Remove a session's cats at once (it works in another office now, or we switched away). */
+function dropCats(id) {
+  for (const e of [...world.ents.values()]) if (e.sessionId === id) { releaseAll(e); world.ents.delete(e.key); }
 }
 function removeSession(id) {
   const s = world.sessions.get(id);
@@ -333,9 +350,64 @@ function removeSession(id) {
   for (const ae of world.ents.values()) if (ae.kind === 'assistant' && ae.sessionId === id) fade(ae, Date.now());
   panel.remove(id);
   roster.update(world);
+  renderTabs();
   if (world.selectedKey === id) world.selectedKey = null;
   return s;
 }
+
+// ---- offices ---------------------------------------------------------------------
+const OFFICE_KEY = 'pawgents-office:office';
+const officeOf = (id) => world.offices.find((o) => o.id === id);
+/** Server list changed: keep the current office (or pick one), re-lay it out if its layout changed, redraw the tabs. */
+function setOffices(list) {
+  world.offices = list;
+  const cur = officeOf(world.officeId);
+  if (!cur) { switchOffice(preferredOffice()); return; }
+  if (JSON.stringify(cur.layout) !== world.layoutJson) { world.layoutJson = JSON.stringify(cur.layout); applyLayout(cur.layout); }
+  renderTabs();
+}
+function preferredOffice() {
+  let want = params.get('office');
+  if (!want) try { want = localStorage.getItem(OFFICE_KEY); } catch { /* storage blocked */ }
+  if (officeOf(want)) return want;
+  // otherwise the busiest office
+  const n = (o) => [...world.sessions.values()].filter((s) => !s.ended && s.officeId === o.id).length;
+  return [...world.offices].sort((a, b) => n(b) - n(a))[0]?.id;
+}
+/** Show another office: its layout, with its staff already at their places. */
+function switchOffice(id) {
+  const o = officeOf(id);
+  if (!o) return;
+  world.officeId = id;
+  try { localStorage.setItem(OFFICE_KEY, id); } catch { /* storage blocked */ }
+  if (params.has('office')) { params.set('office', id); history.replaceState(null, '', `?${params}${location.hash}`); }
+  world.ents.clear();
+  world.hoverKey = null;
+  world.layoutJson = JSON.stringify(o.layout);
+  applyLayout(o.layout);
+  for (const s of world.sessions.values()) if (here(s) && !s.ended) upsertSession(s, true);
+  roster.update(world);
+  renderTabs();
+}
+/** Tabs above the office, one per office, with head count and a dot when someone works (yellow: waiting on you). Hidden with one office. */
+function renderTabs() {
+  const hidden = world.offices.length < 2;
+  if (tabsEl.hidden !== hidden) { tabsEl.hidden = hidden; tabsEl.dataset.html = ''; if (hidden) resize(); }
+  if (hidden) return;
+  const shown = !tabsEl.dataset.html; // first fill: the office shrinks to make room
+  const html = world.offices.map((o) => {
+    const staff = [...world.sessions.values()].filter((s) => !s.ended && s.officeId === o.id);
+    const dot = staff.some((s) => s.state === 'waiting') ? '<i class="dot wait"></i>' : staff.some((s) => s.state !== 'idle') ? '<i class="dot"></i>' : '';
+    const title = o.repos.filter((r) => r !== 'default').join('\n') || '저장소 밖에서 일하는 세션';
+    return `<button type="button" data-id="${esc(o.id)}" class="${o.id === world.officeId ? 'on' : ''}" title="${esc(title)}">${esc(o.name)}<span class="n">${staff.length}</span>${dot}</button>`;
+  }).join('');
+  if (html !== tabsEl.dataset.html) { tabsEl.innerHTML = html; tabsEl.dataset.html = html; }
+  if (shown) resize();
+}
+tabsEl.addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-id]');
+  if (b && b.dataset.id !== world.officeId) switchOffice(b.dataset.id);
+});
 let firstSnapshot = true;
 /** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
 function applyCatChoices(cats) {
@@ -351,22 +423,24 @@ function applyCatChoices(cats) {
 }
 function applySnapshot(snap) {
   applyCatChoices(snap.cats);
-  const ids = new Set();
   const seated = firstSnapshot;
   firstSnapshot = false;
+  if (seated) for (const s of snap.sessions) world.sessions.set(s.id, s); // so the first office pick sees who works where
+  const m = seated && location.hash.match(/^#s=([^&]+)/);
+  const picked = m && snap.sessions.find((x) => x.id.startsWith(decodeURIComponent(m[1])));
+  world.offices = snap.offices;
+  if (picked && officeOf(picked.officeId)) switchOffice(picked.officeId);
+  else setOffices(snap.offices);
+  const ids = new Set();
   for (const s of snap.sessions) { ids.add(s.id); upsertSession(s, seated && !s.ended); }
   for (const id of [...world.sessions.keys()]) if (!ids.has(id)) removeSession(id);
-  const m = location.hash.match(/^#s=([^&]+)/);
-  if (seated && m) {
-    const want = decodeURIComponent(m[1]);
-    const s = [...world.sessions.values()].find((x) => x.id.startsWith(want));
-    if (s) { world.selectedKey = s.id; panel.open(s); }
-  }
+  if (picked) { world.selectedKey = picked.id; panel.open(world.sessions.get(picked.id)); }
 }
 // Re-evaluate stations once a second (lounge timing, meeting/library linger).
 setInterval(() => {
   const now = Date.now();
   for (const s of world.sessions.values()) {
+    if (!here(s)) continue;
     const e = world.ents.get(s.id);
     if (e && e.phase !== 'leave') goTo(e, sessionStation(s, e, now));
     for (const a of s.subagents || []) {
@@ -375,6 +449,7 @@ setInterval(() => {
     }
   }
   roster.update(world); // places change as cats walk around
+  renderTabs();
 }, 1000);
 
 // ---- SSE -----------------------------------------------------------------------
@@ -385,6 +460,7 @@ function connect() {
   es.addEventListener('session', (ev) => upsertSession(JSON.parse(ev.data)));
   es.addEventListener('remove', (ev) => removeSession(JSON.parse(ev.data).id));
   es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data).cats));
+  es.addEventListener('offices', (ev) => setOffices(JSON.parse(ev.data).offices));
   es.onopen = () => {
     world.connected = true;
     if (everConnected) fetch('/state').then((r) => r.json()).then(applySnapshot).catch(() => {});
@@ -416,9 +492,15 @@ const roster = new Roster(document.getElementById('roster'), {
   onPick: (id) => {
     const s = world.sessions.get(id);
     if (!s) return;
+    if (!here(s)) switchOffice(s.officeId);
     world.selectedKey = id; panel.open(s); history.replaceState(null, '', `#s=${encodeURIComponent(id)}`);
   },
-  placeOf: (id) => { const e = world.ents.get(id); return e && e.station?.kind !== 'desk' ? placeOf(e) : ''; },
+  placeOf: (id) => {
+    const s = world.sessions.get(id);
+    if (s && !here(s)) return officeOf(s.officeId)?.name || ''; // works in another office
+    const e = world.ents.get(id);
+    return e && e.station?.kind !== 'desk' ? placeOf(e) : '';
+  },
 });
 /** Viewport position just under the HUD's left edge. */
 function rosterAnchor() {
