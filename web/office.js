@@ -2,7 +2,8 @@ import { TILE, WALL_RISE, compile, DEFAULT_OFFICE } from './layout.js';
 import { buildBackground } from './tilemap.js';
 import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices } from './sprites.js';
 import { step, clamp } from './anim.js';
-import { render, STATE_LABEL, NEW_BTN, LEGEND_BTN, HUD_BTN } from './render.js';
+import { render, STATE_LABEL, NEW_BTN, LEGEND_BTN, HUD_BTN, EDIT_BTN } from './render.js';
+import { Editor } from './editor.js';
 import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
 import { openLauncher } from './launcher.js';
@@ -52,6 +53,8 @@ const world = {
   layoutJson: '',      // its layout as last applied, to spot changes
   geo: null,           // compiled layout (layout.js) of the office on screen
   bg: null,
+  view: null,          // what is drawn: { geo, bg } of the live office, or of the editor's draft
+  editing: false,
   sessions: new Map(), // id -> server session object
   ents: new Map(),     // key -> entity
   hoverKey: null,
@@ -72,6 +75,7 @@ function applyLayout(office) {
   const geo = compile(office);
   world.geo = geo;
   world.bg = buildBackground(geo);
+  if (!world.editing) world.view = { geo, bg: world.bg };
   world.rooms = geo.meetings.map(() => null);
   world.roomSeats = geo.meetings.map((r) => new Slots(r.seats));
   world.plan = new Slots(geo.planSpots);
@@ -95,18 +99,18 @@ function applyLayout(office) {
 const PANEL_W = 380; // keep in sync with #panel width in style.css
 const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit transitions
 // Width the open panel takes from the office. On narrow windows the panel just covers it.
-const panelRoom = () => (panel.isOpen && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
+const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
 
 function fitScale() {
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - (tabsEl.hidden ? 0 : tabsEl.offsetHeight);
   // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
-  return clamp(Math.floor(Math.min(availW / world.geo.W, availH / world.geo.VIEW_H) * 20) / 20, 1, 8);
+  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H) * 20) / 20, 1, 8);
 }
 
 function placeTicker() {
-  document.getElementById('ticker').style.right = `${panel.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0}px`;
+  document.getElementById('ticker').style.right = `${panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0}px`;
 }
 
 /** Fit the office to the window at once (backing store + CSS size). */
@@ -114,7 +118,7 @@ function resize() {
   clearTimeout(refitTimer);
   canvas.classList.remove('refit');
   S = fitScale();
-  canvas.width = Math.round(world.geo.W * S); canvas.height = Math.round(world.geo.VIEW_H * S);
+  canvas.width = Math.round(world.view.geo.W * S); canvas.height = Math.round(world.view.geo.VIEW_H * S);
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
   placeTicker();
 }
@@ -129,11 +133,12 @@ function refit() {
   const s = fitScale();
   if (s === S && !canvas.classList.contains('refit')) return;
   canvas.classList.add('refit');
-  canvas.style.width = `${Math.round(world.geo.W * s)}px`; canvas.style.height = `${Math.round(world.geo.VIEW_H * s)}px`;
+  canvas.style.width = `${Math.round(world.view.geo.W * s)}px`; canvas.style.height = `${Math.round(world.view.geo.VIEW_H * s)}px`;
   clearTimeout(refitTimer);
   refitTimer = setTimeout(resize, PANEL_ANIM_MS + 20);
 }
 window.addEventListener('resize', resize);
+const editor = new Editor({ world, canvas, officeXY, onResize: () => resize() });
 applyLayout(DEFAULT_OFFICE);
 
 /** Pointer position in office (unscaled) pixels; CSS size can differ from the backing store mid-refit. */
@@ -406,7 +411,7 @@ function renderTabs() {
 }
 tabsEl.addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-id]');
-  if (b && b.dataset.id !== world.officeId) switchOffice(b.dataset.id);
+  if (b && b.dataset.id !== world.officeId) { editor.close(); switchOffice(b.dataset.id); }
 });
 let firstSnapshot = true;
 /** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
@@ -537,9 +542,10 @@ function describe(e) {
 
 const inRect = (b, [x, y]) => !!b && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
 /** Canvas-drawn buttons on the bottom wall (rects are written by render.js each frame). */
-const buttonAt = (xy) => (inRect(world.newBtn, xy) ? NEW_BTN : inRect(world.legendBtn, xy) ? LEGEND_BTN : inRect(world.hudBtn, xy) ? HUD_BTN : null);
+const buttonAt = (xy) => (inRect(world.newBtn, xy) ? NEW_BTN : inRect(world.legendBtn, xy) ? LEGEND_BTN : inRect(world.editBtn, xy) ? EDIT_BTN : inRect(world.hudBtn, xy) ? HUD_BTN : null);
 
 canvas.addEventListener('mousemove', (ev) => {
+  if (editor.isOpen) { world.hoverKey = null; tip.hidden = true; return; } // the editor handles the pointer
   const xy = officeXY(ev);
   const btn = buttonAt(xy);
   if (btn) { world.hoverKey = btn; canvas.style.cursor = 'pointer'; tip.hidden = true; return; }
@@ -558,8 +564,16 @@ canvas.addEventListener('mousemove', (ev) => {
 });
 canvas.addEventListener('mouseleave', () => { world.hoverKey = null; tip.hidden = true; });
 canvas.addEventListener('click', (ev) => {
+  if (editor.isOpen) return;
   const xy = officeXY(ev);
   const btn = buttonAt(xy);
+  if (btn === EDIT_BTN) { // layout editor takes the panel's place
+    if (roster.isOpen) toggleRoster();
+    panel.close();
+    world.selectedKey = null;
+    if (officeOf(world.officeId)) editor.open(officeOf(world.officeId));
+    return;
+  }
   if (btn === NEW_BTN) { openLauncher(); return; }
   if (btn === LEGEND_BTN) { openLegend(world.sessions); return; }
   if (btn === HUD_BTN) { toggleRoster(); return; }
@@ -585,6 +599,7 @@ function frame(now) {
     }
   }
   render(ctx, S, world, wall);
+  if (editor.isOpen) editor.draw(ctx, S);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
