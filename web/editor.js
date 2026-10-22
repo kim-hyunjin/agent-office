@@ -3,7 +3,7 @@
 // their inside, resized by their corners; clicking a wall tile cycles door → open passage → wall. Furniture is
 // placed from the palette and dragged around. Every change is validated (layout.js) and problem tiles turn red;
 // saving sends the draft to the server, which pushes it to every open office.
-import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, compile, validate, itemRect, ringRect } from './layout.js';
+import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, ringRect } from './layout.js';
 import { buildBackground, FLOOR } from './tilemap.js';
 import { esc } from './panel.js';
 
@@ -13,6 +13,7 @@ const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const UNDO_MAX = 100;
+const SHARE_TYPE = 'pawgents-office-layout'; // marks an exported layout file
 
 export class Editor {
   /** onResize(): the canvas size or the space beside it changed. */
@@ -45,6 +46,10 @@ export class Editor {
     this.world.editing = true;
     $('ed-title').textContent = office.name;
     $('ed-delete').hidden = office.id === 'default';
+    const others = this.world.offices.filter((o) => o.id !== office.id);
+    $('ed-from').innerHTML = `<option value="">${others.length ? '사무실 고르기…' : '다른 사무실이 없어요'}</option>`
+      + others.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
+    $('ed-from').disabled = !others.length;
     this.msg('');
     this.refresh();
   }
@@ -392,6 +397,63 @@ export class Editor {
     $('ed-close').addEventListener('click', () => this.close());
     $('ed-save').addEventListener('click', () => this.save());
     $('ed-delete').addEventListener('click', () => this.closeOffice());
+    // sharing: file / clipboard out, file / paste / another office in
+    $('ed-export').addEventListener('click', () => this.exportFile());
+    $('ed-copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(this.shareText()); this.msg('배치를 복사했어요. 다른 사무실 편집 화면에서 Ctrl+V로 붙여넣으세요.', 'ok'); }
+      catch { this.msg('클립보드에 쓸 수 없어요. 파일로 내보내기를 써주세요.', 'err'); }
+    });
+    $('ed-import').addEventListener('click', () => $('ed-file').click());
+    $('ed-file').addEventListener('change', async () => {
+      const f = $('ed-file').files[0];
+      $('ed-file').value = '';
+      if (f) this.importText(await f.text(), `${f.name}의`);
+    });
+    $('ed-from').addEventListener('change', () => {
+      const o = this.world.offices.find((x) => x.id === $('ed-from').value);
+      $('ed-from').value = '';
+      if (o) this.importLayout(o.layout, `'${o.name}' 사무실의`);
+    });
+    document.addEventListener('paste', (ev) => {
+      if (!this.isOpen || ev.target.closest?.('input, textarea')) return;
+      const text = ev.clipboardData?.getData('text');
+      if (text) { ev.preventDefault(); this.importText(text, '붙여넣은'); }
+    });
+  }
+
+  // ---- sharing --------------------------------------------------------------------------
+  /** The draft as a shareable JSON document (also what the file holds). */
+  shareText() {
+    return JSON.stringify({ type: SHARE_TYPE, v: 1, name: this.name.trim() || this.office.name, layout: normalize(this.draft) }, null, 2);
+  }
+  exportFile() {
+    const name = (this.name.trim() || this.office.name).replace(/[\\/:*?"<>|\s]+/g, '-');
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([this.shareText()], { type: 'application/json' })),
+      download: `pawgents-office-${name}.json`,
+    });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    this.msg(`${a.download} 로 내보냈어요.`, 'ok');
+  }
+  /** Shared JSON (or a bare layout) → draft. `from` reads like "붙여넣은" / "x.json의". */
+  importText(text, from) {
+    let data;
+    try { data = JSON.parse(text); } catch { this.msg(`${from} 내용이 배치 JSON이 아니에요.`, 'err'); return; }
+    const layout = data?.type === SHARE_TYPE ? data.layout : data;
+    if (!layout || typeof layout !== 'object' || !Array.isArray(layout.rooms) || !Array.isArray(layout.items)) { this.msg(`${from} 내용에 배치가 없어요.`, 'err'); return; }
+    this.importLayout(layout, from);
+  }
+  importLayout(layout, from) {
+    const next = normalize(cloneOffice(layout));
+    if (!Number.isInteger(next.w) || !Number.isInteger(next.h) || next.w < MIN_W || next.h < MIN_H || next.w > MAX_W || next.h > MAX_H) {
+      this.msg(`${from} 배치는 사무실 크기가 ${MIN_W}×${MIN_H} – ${MAX_W}×${MAX_H} 칸을 벗어나요.`, 'err');
+      return;
+    }
+    this.change((d) => { for (const k of Object.keys(d)) delete d[k]; Object.assign(d, next); });
+    this.sel = null;
+    this.msg(`${from} 배치를 불러왔어요. 확인하고 저장하세요. (Ctrl+Z: 되돌리기)`, 'ok');
+    this.syncPanel();
   }
   syncPanel() {
     const d = this.draft;

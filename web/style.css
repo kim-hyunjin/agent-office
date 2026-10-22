@@ -291,3 +291,4 @@ button:disabled { opacity: .5; cursor: default; }
 #editor footer .grow { flex: 1; }
 #editor footer .msg { margin-bottom: 6px; }
 #ed-delete.armed { border-color: #f87171; color: #f87171; }
+#editor label.from { margin-top: 8px; }

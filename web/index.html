@@ -87,6 +87,19 @@
       <h3>가구 <span class="dim">— 눌러서 놓기</span></h3>
       <div id="ed-items" class="palette"></div>
     </section>
+    <section>
+      <h3>공유</h3>
+      <div class="palette">
+        <button type="button" id="ed-export" title="배치를 JSON 파일로 저장">파일로 내보내기</button>
+        <button type="button" id="ed-copy" title="배치를 클립보드에 복사 (메신저 등에 붙여넣기)">복사</button>
+        <button type="button" id="ed-import" title="내보낸 JSON 파일 불러오기">파일 가져오기</button>
+        <input type="file" id="ed-file" accept=".json,application/json" hidden>
+      </div>
+      <label class="from">다른 사무실 배치 가져오기
+        <select id="ed-from"></select>
+      </label>
+      <p class="dim">복사한 배치는 편집 중에 Ctrl+V로 붙여넣을 수 있어요. 가져온 배치도 저장해야 반영됩니다.</p>
+    </section>
     <section id="ed-sel" hidden></section>
     <section>
       <p id="ed-hint" class="dim"></p>
