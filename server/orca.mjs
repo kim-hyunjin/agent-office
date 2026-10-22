@@ -33,6 +33,8 @@ export async function listWorktrees() {
     .filter((w) => !w.isArchived && w.path)
     .map((w) => ({
       id: w.id,
+      repoId: w.repoId || String(w.id).split('::')[0],
+      head: w.head || '',
       path: w.path,
       repo: path.basename(w.path),
       name: w.displayName || '',
@@ -107,12 +109,35 @@ function closeAfterExit(s, handle) {
   setTimeout(tick, 1000);
 }
 
+/** The terminal handle an Orca launch opened, wherever the result nests it ({ kind: 'terminal', handle }). */
+function launchedHandle(r, depth = 0) {
+  if (!r || typeof r !== 'object' || depth > 4) return null;
+  if (r.kind === 'terminal' && typeof r.handle === 'string') return r.handle;
+  for (const v of Object.values(r)) { const h = launchedHandle(v, depth + 1); if (h) return h; }
+  return null;
+}
+
 export async function launchClaude({ worktreeId, prompt, model }) {
   const args = ['agent', 'launch', '--agent', 'claude', '--worktree', `id:${worktreeId}`];
   if (prompt) args.push('--prompt', prompt);
   if (model) args.push('--model', model);
   const r = await runOrca(args, { timeoutMs: 60_000 });
-  const outcome = r?.launch?.outcome || r?.outcome;
-  if (outcome?.kind === 'terminal' && outcome.handle) launched.add(outcome.handle);
+  const h = launchedHandle(r);
+  if (h) launched.add(h);
+  return r;
+}
+
+/**
+ * New worktree branched from `base` (its branch, or its commit when detached), recorded as its child,
+ * with claude started in the first terminal. Repo setup hooks follow the repo's own policy.
+ */
+export async function createWorktreeWithClaude({ base, name, prompt, model }) {
+  const args = ['worktree', 'create', '--name', name, '--repo', `id:${base.repoId}`, '--base-branch', base.branch || base.head,
+    '--parent-worktree', `worktree:${base.id}`, '--agent', 'claude'];
+  if (prompt) args.push('--prompt', prompt);
+  if (model) args.push('--model', model);
+  const r = await runOrca(args, { timeoutMs: 180_000 });
+  const h = launchedHandle(r);
+  if (h) launched.add(h);
   return r;
 }
