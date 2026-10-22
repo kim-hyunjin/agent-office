@@ -176,6 +176,9 @@ button:disabled { opacity: .5; cursor: default; }
 #lg-body .cats { flex: none; display: flex; align-items: flex-end; gap: 6px; width: 200px; padding: 6px 8px; border-radius: 6px; background: #cdb089; }
 #lg-body .cats canvas { image-rendering: pixelated; }
 #lg-body .dim { color: var(--dim); font-size: 12px; margin-top: 3px; }
+#lg-body .breed { margin-left: 8px; font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 5px; border: 1px solid #3b3f5c; background: var(--panel-2); color: var(--text); }
+#lg-body .err { color: #f87171; font-size: 12px; margin-top: 3px; }
+#lg-body .cats { flex-wrap: wrap; }
 
 /* ---- reply dialog (full agent answer, markdown) ---- */
 #reply {

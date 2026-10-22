@@ -3,7 +3,7 @@ import http from 'node:http';
 import {
   PORT, HOST, MAX_BODY_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR,
 } from './config.mjs';
-import { Store } from './store.mjs';
+import { Store, CAT_FAMILIES, BREED_KEY } from './store.mjs';
 import { applyHook } from './reducer.mjs';
 import { Sse } from './sse.mjs';
 import { serveStatic } from './static.mjs';
@@ -140,6 +140,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/orca/worktrees') {
       try { json(res, 200, { worktrees: await listWorktrees() }); } catch (e) { orcaError(res, e); }
+      return;
+    }
+    if (req.method === 'POST' && p === '/settings/cats') {
+      const data = await readJson(req, res);
+      if (!data) return;
+      const fam = String(data.family || ''), breed = data.breed == null ? null : String(data.breed);
+      if (!CAT_FAMILIES.includes(fam) || (breed !== null && !BREED_KEY.test(breed))) { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+      store.setCat(fam, breed);
+      json(res, 200, { ok: true, cats: store.cats });
       return;
     }
     if (req.method === 'POST' && p === '/orca/launch') {

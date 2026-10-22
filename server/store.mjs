@@ -16,11 +16,14 @@ export class RingBuffer {
 export const STATES = ['idle', 'thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working', 'waiting', 'offduty'];
 const BUSY_STATES = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 export const isBusyState = (s) => BUSY_STATES.has(s);
+export const CAT_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku', 'other'];
+export const BREED_KEY = /^[a-z]{2,24}$/; // the breed list itself lives in web/sprites.js
 
 export class Store {
   constructor({ stateFile = STATE_FILE } = {}) {
     this.sessions = new Map();
     this.desks = {};           // sessionId -> { desk, at, terminal? }
+    this.cats = {};            // model family -> breed key the user picked (absent = default breed)
     this.stateFile = stateFile;
     this.listeners = new Set();
     this.save = debounce(() => this.saveNow(), 500);
@@ -34,11 +37,13 @@ export class Store {
     for (const [id, v] of Object.entries(data?.desks || {})) {
       if (v && typeof v.desk === 'number' && now - (v.at || 0) < DESK_MEMORY_MS) this.desks[id] = v;
     }
+    this.cats = {};
+    for (const [fam, breed] of Object.entries(data?.cats || {})) if (CAT_FAMILIES.includes(fam) && BREED_KEY.test(breed)) this.cats[fam] = breed;
   }
   saveNow() {
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, updatedAt: Date.now() }, null, 2));
+      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, updatedAt: Date.now() }, null, 2));
     } catch (e) {
       console.error('[store] save failed:', e.message);
     }
@@ -48,6 +53,14 @@ export class Store {
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(type, data) { for (const fn of this.listeners) fn(type, data); }
   emitSession(s) { this.emit('session', this.serializeSession(s)); }
+
+  // ---- settings ------------------------------------------------------------
+  /** Pick the breed a model family is drawn as; null restores the default. Pushed to every browser. */
+  setCat(fam, breed) {
+    if (breed) this.cats[fam] = breed; else delete this.cats[fam];
+    this.save();
+    this.emit('settings', { cats: this.cats });
+  }
 
   // ---- desks ---------------------------------------------------------------
   usedDesks() {
@@ -252,6 +265,7 @@ export class Store {
       now: Date.now(),
       deskCount: DESK_COUNT,
       seatsPerDesk: SEATS_PER_DESK,
+      cats: this.cats,
       sessions: [...this.sessions.values()].map((s) => this.serializeSession(s)),
     };
   }

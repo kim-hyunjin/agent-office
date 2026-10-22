@@ -2,10 +2,10 @@ import {
   TILE, W, VIEW_H, WALL_RISE, SPAWN, DESK_COUNT, deskPos, nearDeskSpots, ROOMS, PLAN_SPOTS, LIBRARY_SPOTS, LOUNGE_SPOTS, PLAY_SPOTS, BULLPEN_SPOTS,
   findPath, buildBackground,
 } from './tilemap.js';
-import { paletteFor, hashStr, familyOf, FAMILIES } from './sprites.js';
+import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices } from './sprites.js';
 import { step, clamp } from './anim.js';
 import { render, STATE_LABEL, NEW_BTN, LEGEND_BTN, HUD_BTN } from './render.js';
-import { openLegend } from './legend.js';
+import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
 import { openLauncher } from './launcher.js';
 import { Panel, ICON, EV_ICON, esc, fmtTime, awaitingBg, bgSummary } from './panel.js';
@@ -276,7 +276,7 @@ function upsertSession(s, seated = false) {
   else {
     e.data = s;
     e.desk = s.desk;
-    if (e.pal.fam !== familyOf(s.model)) e.pal = paletteFor(s.id, 'employee', s.model);
+    if (e.pal.fam !== familyOf(s.model)) e.pal = paletteFor(s.id, 'employee', s.model); // model switched mid-session
     goTo(e, sessionStation(s, e, now));
   }
   const seen = new Set();
@@ -311,7 +311,20 @@ function removeSession(id) {
   return s;
 }
 let firstSnapshot = true;
+/** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
+function applyCatChoices(cats) {
+  setBreedChoices(cats);
+  for (const e of world.ents.values()) {
+    const s = world.sessions.get(e.sessionId);
+    if (!s) continue;
+    if (e.kind === 'employee') e.pal = paletteFor(s.id, 'employee', s.model);
+    else e.pal = paletteFor(e.agentId, 'assistant', e.data?.model || s.model);
+  }
+  roster.update(world);
+  refreshLegend();
+}
 function applySnapshot(snap) {
+  applyCatChoices(snap.cats);
   const ids = new Set();
   const seated = firstSnapshot;
   firstSnapshot = false;
@@ -345,6 +358,7 @@ function connect() {
   es.addEventListener('snapshot', (ev) => { world.connected = true; applySnapshot(JSON.parse(ev.data)); });
   es.addEventListener('session', (ev) => upsertSession(JSON.parse(ev.data)));
   es.addEventListener('remove', (ev) => removeSession(JSON.parse(ev.data).id));
+  es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data).cats));
   es.onopen = () => {
     world.connected = true;
     if (everConnected) fetch('/state').then((r) => r.json()).then(applySnapshot).catch(() => {});
