@@ -10,7 +10,7 @@ import { serveStatic } from './static.mjs';
 import { pollRegistry } from './registry.mjs';
 import { Tailer } from './transcript.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
-import { listWorktrees, sendPrompt, closeSession, launchClaude } from './orca.mjs';
+import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
 
 const store = new Store();
 store.load();
@@ -60,6 +60,7 @@ async function readJson(req, res) {
   return data;
 }
 
+const MAX_HIRES = 5; // employees per "새 직원" request
 const orcaError = (res, e) => json(res, e.code === 'terminal_not_found' || e.code === 'not_claude' ? 409 : 502, { error: e.message, code: e.code });
 
 const server = http.createServer(async (req, res) => {
@@ -147,13 +148,30 @@ const server = http.createServer(async (req, res) => {
       const worktreeId = String(data.worktreeId || '');
       const prompt = String(data.prompt ?? '').trim();
       const model = String(data.model || '').trim();
-      if (!worktreeId || prompt.length > MAX_PROMPT_CHARS || (model && !/^[\w.\-\[\]]{1,80}$/.test(model))) { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+      const count = Number(data.count ?? 1);
+      // newWorktree: branch a fresh worktree off the selected one per hire, named name / name-1, name-2, …
+      const name = data.newWorktree ? String(data.newWorktree.name || '').trim() : null;
+      if (!worktreeId || prompt.length > MAX_PROMPT_CHARS || (model && !/^[\w.\-\[\]]{1,80}$/.test(model))
+        || !Number.isInteger(count) || count < 1 || count > MAX_HIRES || (name !== null && !/^[A-Za-z0-9][\w.\-]{0,59}$/.test(name))) {
+        json(res, 400, { error: '잘못된 요청입니다.' }); return;
+      }
       try {
-        const known = await listWorktrees();
-        if (!known.some((w) => w.id === worktreeId)) { json(res, 400, { error: '알 수 없는 워크트리입니다.' }); return; }
-        const r = await launchClaude({ worktreeId, prompt, model });
-        console.log(`[web] launch claude in ${worktreeId.split('::').pop()}${prompt ? ': ' + truncate(oneLine(prompt), 80) : ''}`);
-        json(res, 200, { ok: true, kind: r?.launch?.outcome?.kind || r?.outcome?.kind || null, promptOutcome: r?.launch?.prompt?.outcome || r?.prompt?.outcome || null });
+        const base = (await listWorktrees()).find((w) => w.id === worktreeId);
+        if (!base) { json(res, 400, { error: '알 수 없는 워크트리입니다.' }); return; }
+        if (name !== null && !base.branch && !base.head) { json(res, 400, { error: '기준 워크트리의 브랜치를 알 수 없습니다.' }); return; }
+        // one at a time: Orca creates checkouts / tabs sequentially anyway, and a failure shouldn't hide the rest
+        const started = [], errors = [];
+        for (let i = 1; i <= count; i++) {
+          const wtName = name === null ? null : count > 1 ? `${name}-${i}` : name;
+          try {
+            if (wtName) await createWorktreeWithClaude({ base, name: wtName, prompt, model });
+            else await launchClaude({ worktreeId, prompt, model });
+            started.push(wtName || base.path);
+            console.log(`[web] launch claude in ${wtName ? `new worktree ${wtName} (from ${base.branch || base.head})` : base.path}${prompt ? ': ' + truncate(oneLine(prompt), 80) : ''}`);
+          } catch (e) { errors.push(`${wtName || `#${i}`}: ${e.message}`); }
+        }
+        if (!started.length) { json(res, 502, { error: errors.join('\n') }); return; }
+        json(res, 200, { ok: true, started: started.length, errors });
       } catch (e) { orcaError(res, e); }
       return;
     }

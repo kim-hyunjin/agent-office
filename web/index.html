@@ -17,6 +17,13 @@
     <label>워크트리
       <select id="l-worktree" required><option value="">불러오는 중…</option></select>
     </label>
+    <label class="check"><input type="checkbox" id="l-new"> 새 워크트리 만들기 <span class="dim" id="l-new-hint">(선택한 워크트리의 브랜치에서 분기)</span></label>
+    <label id="l-name-row" hidden>새 워크트리 이름 <span class="dim">(브랜치 이름으로도 쓰여요)</span>
+      <input id="l-name" autocomplete="off" spellcheck="false" maxlength="60" placeholder="예: feature-login">
+    </label>
+    <label>인원 <span class="dim" id="l-count-hint"></span>
+      <input id="l-count" type="number" min="1" max="5" value="1">
+    </label>
     <label>모델 <span class="dim">(비우면 기본값)</span>
       <input id="l-model" list="l-models" placeholder="opus / sonnet / haiku / 모델 ID" autocomplete="off">
       <datalist id="l-models"><option value="opus"><option value="sonnet"><option value="haiku"></datalist>
