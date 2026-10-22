@@ -130,6 +130,48 @@ button:disabled { opacity: .5; cursor: default; }
 #launcher label .dim { opacity: .75; }
 #launcher textarea { resize: vertical; line-height: 1.45; }
 
+/* ---- staff roster (under the HUD) ---- */
+#roster {
+  position: fixed; z-index: 9; width: min(340px, calc(100vw - 16px)); max-height: 70vh; display: flex; flex-direction: column;
+  background: rgba(29,32,54,0.97); border: 1px solid #3b3f5c; border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); font-size: 13px;
+}
+#roster header { display: flex; align-items: center; padding: 8px 8px 8px 14px; border-bottom: 1px solid #2f3352; }
+#roster h2 { flex: 1; margin: 0; font-size: 14px; }
+#roster h2 .dim { color: var(--dim); font-weight: 400; }
+#rs-close { width: 26px; height: 26px; border: 0; border-radius: 6px; background: var(--panel-2); color: var(--text); font-size: 16px; cursor: pointer; }
+#rs-list { list-style: none; margin: 0; padding: 4px; overflow: auto; }
+#rs-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+#rs-list li:hover, #rs-list li:focus { background: var(--panel-2); outline: none; }
+#rs-list li.empty { cursor: default; color: var(--dim); justify-content: center; padding: 14px; }
+#rs-list .cat { flex: none; image-rendering: pixelated; background: #cdb089; border-radius: 4px; padding: 2px; }
+#rs-list .info { flex: 1; min-width: 0; }
+#rs-list .top { display: flex; align-items: center; gap: 6px; }
+#rs-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#rs-list .line { margin-top: 2px; font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#rs-list .line.err { color: #f87171; }
+#rs-list .quit { flex: none; font: inherit; font-size: 12px; padding: 4px 10px; border: 0; border-radius: 6px; cursor: pointer; background: var(--panel-2); color: var(--text); }
+#rs-list .quit:hover { background: #4a2e3a; }
+#rs-list .quit.armed { background: #b4413c; color: #fff; }
+#rs-list .quit:disabled { opacity: .6; cursor: default; }
+
+/* ---- model legend dialog ---- */
+#legend {
+  width: min(560px, calc(100vw - 32px)); max-height: 86vh; padding: 0; border: 1px solid #3b3f5c; border-radius: 10px;
+  background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+#legend[open] { display: flex; flex-direction: column; }
+#legend::backdrop { background: rgba(8,9,20,0.6); }
+#legend header { display: flex; align-items: center; padding: 12px 16px 10px 20px; border-bottom: 1px solid #2f3352; }
+#legend h2 { flex: 1; margin: 0; font-size: 16px; }
+#legend #lg-close { font: inherit; font-size: 18px; padding: 0 10px; line-height: 28px; border-radius: 6px; border: 0; cursor: pointer; background: var(--panel-2); color: var(--text); }
+#lg-body { overflow: auto; padding: 6px 20px 16px; }
+#lg-body ul { list-style: none; margin: 0; padding: 0; }
+#lg-body li { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid #2a2e4a; font-size: 13px; }
+#lg-body li:last-child { border-bottom: 0; }
+#lg-body .cats { flex: none; display: flex; align-items: flex-end; gap: 6px; width: 200px; padding: 6px 8px; border-radius: 6px; background: #cdb089; }
+#lg-body .cats canvas { image-rendering: pixelated; }
+#lg-body .dim { color: var(--dim); font-size: 12px; margin-top: 3px; }
+
 /* ---- reply dialog (full agent answer, markdown) ---- */
 #reply {
   width: min(880px, calc(100vw - 32px)); height: min(86vh, 1000px); padding: 0; border: 1px solid #3b3f5c; border-radius: 10px;

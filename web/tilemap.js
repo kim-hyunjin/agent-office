@@ -1,53 +1,111 @@
-// Office layout: 32×20 tiles of 16px. Zones: meeting rooms + lobby (left), bench desks (center),
-// planning whiteboard / library / lounge (right). Also exposes walkability + BFS path finding.
+// Office layout: 32×20 tiles of 16px, split into rooms by partitions. Meeting rooms A/B (left) and C/D (right)
+// flank the open office (bench desks); along the bottom: lobby, lounge, planning room, library. The lobby opens
+// straight up into the office at x = 8. Also exposes walkability + BFS path finding.
 export const TILE = 16;
 export const MAP_W = 32;
 export const MAP_H = 20;
 export const W = MAP_W * TILE;
 export const H = MAP_H * TILE;
+/** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
+export const WALL_RISE = TILE;
+export const VIEW_H = H + WALL_RISE;
 
-export const DESK_COUNT = 16;
+export const DESK_COUNT = 12;
 export const DOOR = { x: 3, y: 19 };
 export const SPAWN = { x: 3, y: 18 };
 
 // ---- zones ----------------------------------------------------------------------
-export const ROOMS = [
-  { id: 0, name: '회의실 A', x: 1, y: 1, w: 8, h: 5, door: { x: 9, y: 4 }, table: { x: 3, y: 3, w: 4, h: 2 }, head: { x: 2, y: 3 },
-    seats: [{ x: 3, y: 2 }, { x: 4, y: 2 }, { x: 5, y: 2 }, { x: 6, y: 2 }, { x: 3, y: 5 }, { x: 4, y: 5 }, { x: 5, y: 5 }, { x: 6, y: 5 }, { x: 7, y: 3 }, { x: 7, y: 4 }, { x: 2, y: 4 }] },
-  { id: 1, name: '회의실 B', x: 1, y: 7, w: 8, h: 5, door: { x: 9, y: 10 }, table: { x: 3, y: 9, w: 4, h: 2 }, head: { x: 2, y: 9 },
-    seats: [{ x: 3, y: 8 }, { x: 4, y: 8 }, { x: 5, y: 8 }, { x: 6, y: 8 }, { x: 3, y: 11 }, { x: 4, y: 11 }, { x: 5, y: 11 }, { x: 6, y: 11 }, { x: 7, y: 9 }, { x: 7, y: 10 }, { x: 2, y: 10 }] },
-];
-export const LOBBY = { x: 1, y: 13, w: 9, h: 6 };
-export const RECEPTION = { x: 2, y: 14, w: 3 };
-export const BULLPEN_SPOTS = [];
-for (let y = 15; y <= 17; y++) for (let x = 5; x <= 8; x++) BULLPEN_SPOTS.push({ x, y });
-
-export const WHITEBOARD = { x: 26, y: 0, w: 5 };
-export const PLAN_SPOTS = [26, 27, 28, 29, 30].map((x) => ({ x, y: 1 }));
-export const PLAN_ZONE = { x: 26, y: 1, w: 5, h: 4 };
-export const BOOKSHELF = { x: 30, y: 6, h: 5 };
-export const LIBRARY_ZONE = { x: 26, y: 6, w: 5, h: 5 };
-export const LIBRARY_SPOTS = [6, 7, 8, 9, 10].map((y) => ({ x: 29, y })); // facing the bookshelf
-export const LOUNGE = { x: 26, y: 12, w: 5, h: 7 };
-export const COFFEE = { x: 30, y: 12 };
-export const SOFA = { x: 27, y: 14, w: 3 };
-export const LOUNGE_SPOTS = [{ x: 27, y: 14, sofa: true }, { x: 28, y: 14, sofa: true }, { x: 29, y: 14, sofa: true }, { x: 29, y: 12 }, { x: 29, y: 13 }];
-export const SIGN = { x: 12, y: 0, w: 5 };
-export const PLANTS = [{ x: 25, y: 1 }, { x: 25, y: 18 }, { x: 1, y: 13 }, { x: 8, y: 13 }, { x: 26, y: 18 }, { x: 30, y: 18 }, { x: 10, y: 18 }];
-
-/** Bench desks: 4 rows × (2 pods × 2 desks). Each desk is 3 tiles wide; the chair sits above the middle tile. */
-export function deskPos(i) {
-  const row = i >> 2, col = i & 3;
-  const x = col < 2 ? 11 + col * 3 : 18 + (col - 2) * 3;
-  const y = 2 + row * 4;
-  return { x, y, chair: { x: x + 1, y }, desk: { x, y: y + 1, w: 3 }, caption: { x, y: y + 2, w: 3 } };
+/** Meeting room with a 4×2 table at (tx, ty): four seats above, four below, two on the right, head + one on the left. */
+function room(id, name, x, y, w, h, door, tx, ty) {
+  const seats = [];
+  for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty - 1 });
+  for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty + 2, back: true }); // facing the table, back to the viewer
+  seats.push({ x: tx + 4, y: ty }, { x: tx + 4, y: ty + 1 }, { x: tx - 1, y: ty + 1 });
+  return { id, name, x, y, w, h, door, table: { x: tx, y: ty, w: 4, h: 2 }, head: { x: tx - 1, y: ty }, seats };
 }
-/** Standing spots in the aisle beside a desk, used when every meeting room is taken. */
+export const ROOMS = [
+  room(0, '회의실 A', 1, 1, 6, 5, { x: 7, y: 1 }, 2, 3),
+  room(1, '회의실 B', 1, 7, 6, 5, { x: 7, y: 7 }, 2, 9),
+  room(2, '회의실 C', 25, 1, 6, 5, { x: 24, y: 1 }, 26, 3),
+  room(3, '회의실 D', 25, 7, 6, 5, { x: 24, y: 7 }, 26, 9),
+];
+export const LOBBY = { x: 1, y: 13, w: 8, h: 6 };
+export const RECEPTION = { x: 2, y: 14, w: 3 };
+export const RECEPTIONIST = { x: 3, y: 13 }; // resident cat behind the counter
+export const BULLPEN_SPOTS = [];
+for (let y = 16; y <= 17; y++) for (let x = 1; x <= 8; x++) BULLPEN_SPOTS.push({ x, y });
+
+export const LOUNGE = { x: 10, y: 13, w: 6, h: 6 };
+export const COFFEE = { x: 15, y: 13 };
+export const SOFA = { x: 11, y: 15, w: 3 };
+export const RUG = { x: 10, y: 14, w: 5, h: 5 };
+export const LOUNGE_SPOTS = [{ x: 11, y: 15, sofa: true }, { x: 12, y: 15, sofa: true }, { x: 13, y: 15, sofa: true }, { x: 14, y: 13 }, { x: 14, y: 14 }];
+
+// play area along the bottom of the office (row 11 stays clear: it's the way to the bottom rooms' doors)
+export const PLAY_ZONE = { x: 9, y: 8, w: 14, h: 3 };
+export const CAT_TREE = { x: 10, y: 9 };
+export const SCRATCH_POST = { x: 13, y: 9 };
+export const YARN = { x: 16, y: 10 };
+export const BOX = { x: 19, y: 9 };
+export const WHEEL = { x: 16, y: 9, w: 2 }; // cat wheel; drawn (and spun) by the renderer
+export const CUSHION = { x: 21, y: 10 };
+/** Where idle cats hang out, and what they do there. */
+export const PLAY_SPOTS = [
+  { ...CAT_TREE, act: 'perch' },        // on top of the cat tree
+  { x: 12, y: 9, act: 'scratch' },      // up on its hind legs, clawing the post's left side
+  { x: 15, y: 10, act: 'bat' },         // batting the yarn ball
+  { ...BOX, act: 'box' },               // sitting in the box
+  { x: WHEEL.x, y: WHEEL.y, act: 'wheel' }, // running in the wheel
+  { ...CUSHION, act: 'nap' },           // curled up on the cushion
+  { x: 11, y: 8, act: 'look' }, { x: 14, y: 8, act: 'look' }, { x: 22, y: 8, act: 'look' },
+];
+export const PLAN_ZONE = { x: 17, y: 13, w: 5, h: 6 };
+export const WHITEBOARD = { x: 18, y: 14, w: 3 }; // free-standing board on legs; planners stand in front of it
+export const PLAN_SPOTS = [17, 18, 19, 20, 21].map((x) => ({ x, y: 15 }));
+export const LIBRARY_ZONE = { x: 23, y: 13, w: 8, h: 6 };
+export const BOOKSHELF = { x: 24, y: 18, w: 6 }; // along the south wall
+export const LIBRARY_SPOTS = [24, 25, 26, 27, 28].map((x) => ({ x, y: 17 })); // in front of the bookshelf
+// top wall, left to right: HUD (drawn in render.js), windows, sign, clock
+export const WINDOW = { x: 15, w: 6 }; // tiles; drawn as 2-tile panes
+export const SIGN = { x: 22, y: 0, w: 5 };
+export const PLANTS = [{ x: 1, y: 13 }, { x: 6, y: 13 }, { x: 10, y: 10 }, { x: 23, y: 10 }, { x: 15, y: 18 }, { x: 17, y: 18 }, { x: 30, y: 13 }, { x: 23, y: 18 }];
+
+/**
+ * Interior partitions, one tile thick. 'h' runs east–west and shows its face (3/4 view); 'v' runs north–south
+ * and only its top shows. Glass around meeting rooms, solid plaster elsewhere. Doors are gaps.
+ */
+export const WALLS = [
+  { dir: 'v', x: 7, y: 1, len: 12, glass: true },  // A, B | office
+  { dir: 'h', x: 1, y: 6, len: 7, glass: true },   // A | B
+  { dir: 'h', x: 1, y: 12, len: 7, glass: true },  // B | lobby
+  { dir: 'v', x: 24, y: 1, len: 12, glass: true }, // office | C, D
+  { dir: 'h', x: 24, y: 6, len: 7, glass: true },  // C | D
+  { dir: 'h', x: 24, y: 12, len: 7, glass: true }, // D | library
+  { dir: 'h', x: 9, y: 12, len: 15 },              // office | bottom rooms (x = 8 stays open: lobby ↔ office)
+  { dir: 'v', x: 9, y: 13, len: 6 },               // lobby | lounge
+  { dir: 'v', x: 16, y: 13, len: 6 },              // lounge | planning
+  { dir: 'v', x: 22, y: 13, len: 6 },              // planning | library
+];
+export const DOORS = [...ROOMS.map((r) => r.door), { x: 12, y: 12 }, { x: 19, y: 12 }, { x: 23, y: 12 }];
+const isDoor = (x, y) => DOORS.some((d) => d.x === x && d.y === y);
+
+/**
+ * Bench desks: 2 rows × 3 pods; a pod is [chair][desk][desk][chair], the two cats facing each other in profile.
+ * Each desk stands lengthwise, 1 tile wide and 2 deep, with the keyboard along the chair's edge and the monitor beside
+ * it. Aisles at x = 8, 13, 18, 23.
+ */
+export const DESKS_PER_ROW = 6;
+export function deskPos(i) {
+  const row = Math.floor(i / DESKS_PER_ROW), col = i % DESKS_PER_ROW;
+  const px = 9 + (col >> 1) * 5, y = 2 + row * 3;
+  if ((col & 1) === 0) return { y, desk: { x: px + 1, y, w: 1, h: 2 }, chair: { x: px, y, face: 'right' } };
+  return { y, desk: { x: px + 2, y, w: 1, h: 2 }, chair: { x: px + 3, y, face: 'left' } };
+}
+/** Standing spots in the aisle beside a desk's chair, used when every meeting room is taken. */
 export function nearDeskSpots(i) {
   const d = deskPos(i);
-  const col = i & 3;
-  const ax = col === 0 ? 10 : col === 1 ? 17 : col === 2 ? 17 : 24; // aisle column next to this desk
-  return [{ x: ax, y: d.y + 1 }, { x: ax, y: d.y }, { x: ax, y: d.y - 1 }];
+  const ax = d.chair.face === 'right' ? d.chair.x - 1 : d.chair.x + 1;
+  return [{ x: ax, y: d.y }, { x: ax, y: d.y - 1 }, { x: ax, y: d.y + 1 }];
 }
 
 // ---- walkability -----------------------------------------------------------------
@@ -55,16 +113,17 @@ const blocked = new Uint8Array(MAP_W * MAP_H);
 const block = (x, y, w = 1, h = 1) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (i >= 0 && j >= 0 && i < MAP_W && j < MAP_H) blocked[j * MAP_W + i] = 1; };
 const unblock = (x, y) => { blocked[y * MAP_W + x] = 0; };
 block(0, 0, MAP_W, 1); block(0, MAP_H - 1, MAP_W, 1); block(0, 0, 1, MAP_H); block(MAP_W - 1, 0, 1, MAP_H);
-for (const r of ROOMS) {
-  block(r.x + r.w, r.y, 1, r.h); // right glass wall (x = r.x + r.w)
-  block(r.x, r.y + r.h, r.w + 1, 1); // bottom glass wall
-  unblock(r.door.x, r.door.y);
-  block(r.table.x, r.table.y, r.table.w, r.table.h);
-}
+for (const wl of WALLS) if (wl.dir === 'h') block(wl.x, wl.y, wl.len, 1); else block(wl.x, wl.y, 1, wl.len);
+for (const d of DOORS) unblock(d.x, d.y);
+for (const r of ROOMS) block(r.table.x, r.table.y, r.table.w, r.table.h);
 block(RECEPTION.x, RECEPTION.y, RECEPTION.w, 1);
-for (let i = 0; i < DESK_COUNT; i++) { const d = deskPos(i); block(d.desk.x, d.desk.y, d.desk.w, 1); }
-block(BOOKSHELF.x, BOOKSHELF.y, 1, BOOKSHELF.h);
+block(RECEPTIONIST.x, RECEPTIONIST.y);
+for (let i = 0; i < DESK_COUNT; i++) { const d = deskPos(i); block(d.desk.x, d.desk.y, d.desk.w, d.desk.h); }
+block(BOOKSHELF.x, BOOKSHELF.y, BOOKSHELF.w, 1);
+block(WHITEBOARD.x, WHITEBOARD.y, WHITEBOARD.w, 1);
 block(COFFEE.x, COFFEE.y);
+for (const p of [CAT_TREE, SCRATCH_POST, BOX]) block(p.x, p.y);
+block(WHEEL.x, WHEEL.y, WHEEL.w, 1);
 for (const p of PLANTS) block(p.x, p.y);
 export const isBlocked = (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || blocked[y * MAP_W + x] === 1;
 
@@ -98,23 +157,24 @@ export function findPath(from, to) {
 
 // ---- static background -------------------------------------------------------------
 const C = {
-  wall: '#3b3f5c', wallTop: '#2a2d45', wallLine: '#4b5078',
+  wallTop: '#2a2d45', wallEdge: '#4b5078', wallFace: '#4f5680', wallStripe: '#495079', wainscot: '#3b3f5c', trim: '#6b729c', floorShade: 'rgba(0,0,0,0.22)',
   wood: '#cdb089', wood2: '#c3a67f', woodLine: '#b4976f',
   meet: '#9fb3c8', meet2: '#97abc0', lobby: '#d6d9de', lobby2: '#ced1d6',
-  plan: '#b9b0d6', plan2: '#b1a8ce', lib: '#c9b8a3', lib2: '#c1b09b', lounge: '#d9a48d', lounge2: '#d19c85', rug: '#b5574e', rug2: '#a84e46',
+  plan: '#b9b0d6', plan2: '#b1a8ce', mat: '#a9c8a0', mat2: '#a1c098', lib: '#c9b8a3', lib2: '#c1b09b', lounge: '#d9a48d', lounge2: '#d19c85', rug: '#b5574e', rug2: '#a84e46',
   glass: 'rgba(190,230,255,0.75)', glassFrame: '#e8f4ff', glassDark: '#8fb6d4',
-  desk: '#a0714f', deskEdge: '#6e4a30', divider: '#8c6245', chair: '#4a4e69', chairLight: '#5c6088',
-  table: '#8b5e3c', tableEdge: '#5e3d25', shadow: 'rgba(0,0,0,0.15)',
+  desk: '#a0714f', deskLip: '#b88560', deskFace: '#7a5236', deskFaceDark: '#5e3d27', divider: '#8c6245', chair: '#4a4e69', chairLight: '#5c6088',
+  table: '#8b5e3c', tableEdge: '#5e3d25', tableFace: '#6e4a2e', shadow: 'rgba(0,0,0,0.15)',
   board: '#f7f7f2', boardFrame: '#8a8a8a', tray: '#b0b0b0',
   sofa: '#c0392b', sofaDark: '#922b21', sofaLight: '#d35445', coffee: '#3d3d3d', coffee2: '#c0392b',
   shelf: '#7a4b2a', shelfDark: '#5a361d', book: ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22'],
-  plant: '#2e8b57', plantDark: '#206b40', pot: '#b5651d', recept: '#6b7a99', receptTop: '#8ea0c4',
+  plant: '#2e8b57', plantDark: '#206b40', pot: '#b5651d', recept: '#6b7a99', receptTop: '#8ea0c4', receptDark: '#4f5b77',
   door: '#8b5a2b', doorDark: '#5c3a1a',
 };
 
 export function buildBackground() {
-  const c = new OffscreenCanvas(W, H);
+  const c = new OffscreenCanvas(W, VIEW_H);
   const g = c.getContext('2d');
+  g.translate(0, WALL_RISE); // y < 0 is the raised part of the top wall
   const tile = (x, y, a, b) => { g.fillStyle = (x + y) % 2 ? a : b; g.fillRect(x * TILE, y * TILE, TILE, TILE); };
   // base: wood planks in the open area
   for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
@@ -123,62 +183,70 @@ export function buildBackground() {
     if ((x * 7 + y * 3) % 5 === 0) g.fillRect(x * TILE + 7, y * TILE, 1, TILE - 1);
   }
   // zones
-  for (const r of ROOMS) for (let y = r.y; y <= r.y + r.h; y++) for (let x = r.x; x <= r.x + r.w; x++) tile(x, y, C.meet, C.meet2);
-  for (let y = LOBBY.y; y < LOBBY.y + LOBBY.h; y++) for (let x = LOBBY.x; x < LOBBY.x + LOBBY.w; x++) tile(x, y, C.lobby, C.lobby2);
-  for (let y = PLAN_ZONE.y; y < PLAN_ZONE.y + PLAN_ZONE.h; y++) for (let x = PLAN_ZONE.x; x < PLAN_ZONE.x + PLAN_ZONE.w; x++) tile(x, y, C.plan, C.plan2);
-  for (let y = LIBRARY_ZONE.y; y < LIBRARY_ZONE.y + LIBRARY_ZONE.h; y++) for (let x = LIBRARY_ZONE.x; x < LIBRARY_ZONE.x + LIBRARY_ZONE.w; x++) tile(x, y, C.lib, C.lib2);
-  for (let y = LOUNGE.y; y < LOUNGE.y + LOUNGE.h; y++) for (let x = LOUNGE.x; x < LOUNGE.x + LOUNGE.w; x++) tile(x, y, C.lounge, C.lounge2);
-  for (let y = 13; y <= 17; y++) for (let x = 26; x <= 29; x++) tile(x, y, C.rug, C.rug2);
-  // walls
-  g.fillStyle = C.wall;
-  g.fillRect(0, 0, W, TILE); g.fillRect(0, H - TILE, W, TILE); g.fillRect(0, 0, TILE, H); g.fillRect(W - TILE, 0, TILE, H);
-  g.fillStyle = C.wallTop; g.fillRect(0, 0, W, 6);
-  g.fillStyle = C.wallLine; g.fillRect(0, TILE - 2, W, 2);
-  // windows on the top wall (skip the sign + whiteboard)
-  for (let x = 2; x < MAP_W - 2; x += 3) {
-    if ((x >= SIGN.x - 1 && x <= SIGN.x + SIGN.w) || x >= WHITEBOARD.x - 1) continue;
-    g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 1, 3, 30, 11);
-    g.fillStyle = '#9ad1f5'; g.fillRect(x * TILE + 2, 4, 28, 9);
-    g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 16, 4, 1, 9); g.fillRect(x * TILE + 2, 8, 28, 1);
+  const fill = (z, a, b) => { for (let y = z.y; y < z.y + z.h; y++) for (let x = z.x; x < z.x + z.w; x++) tile(x, y, a, b); };
+  for (const r of ROOMS) fill(r, C.meet, C.meet2);
+  fill(LOBBY, C.lobby, C.lobby2);
+  fill(PLAN_ZONE, C.plan, C.plan2);
+  fill(LIBRARY_ZONE, C.lib, C.lib2);
+  fill(LOUNGE, C.lounge, C.lounge2);
+  fill(RUG, C.rug, C.rug2);
+  fill(PLAY_ZONE, C.mat, C.mat2);
+  // walls, Stardew-style 3/4 view: the top wall shows its face (cap, wallpaper, wainscot, baseboard) and casts
+  // a shadow onto the floor; side and bottom walls face away, so only their dark caps are visible.
+  const top = -WALL_RISE;
+  g.fillStyle = C.wallFace; g.fillRect(0, top, W, TILE + WALL_RISE);
+  g.fillStyle = C.wallStripe; for (let x = 0; x < W; x += 4) g.fillRect(x, top + 3, 1, 6 - top - 3);
+  g.fillStyle = C.wainscot; g.fillRect(0, 6, W, 8);
+  g.fillStyle = C.trim; g.fillRect(0, 6, W, 1);
+  g.fillStyle = C.wallTop; g.fillRect(0, top, W, 3); g.fillRect(0, 14, W, 2);
+  g.fillStyle = C.floorShade; g.fillRect(0, TILE, W, 3); g.fillRect(0, TILE + 3, W, 2);
+  g.fillStyle = C.wallTop; g.fillRect(0, top, TILE, H - top); g.fillRect(W - TILE, top, TILE, H - top); g.fillRect(0, H - TILE, W, TILE);
+  g.fillStyle = C.wallEdge; g.fillRect(TILE - 1, TILE, 1, H - 2 * TILE); g.fillRect(W - TILE, TILE, 1, H - 2 * TILE); g.fillRect(TILE, H - TILE, W - 2 * TILE, 1);
+  // windows between the HUD and the sign
+  for (let x = WINDOW.x; x < WINDOW.x + WINDOW.w; x += 2) {
+    g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 1, -10, 30, 14);
+    g.fillStyle = '#9ad1f5'; g.fillRect(x * TILE + 2, -9, 28, 12);
+    g.fillStyle = '#c4e6fb'; g.fillRect(x * TILE + 3, -8, 4, 1); g.fillRect(x * TILE + 3, -7, 2, 1); g.fillRect(x * TILE + 19, -8, 4, 1); g.fillRect(x * TILE + 19, -7, 2, 1);
+    g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 16, -9, 1, 12); g.fillRect(x * TILE + 2, -3, 28, 1);
+    g.fillStyle = C.trim; g.fillRect(x * TILE, 4, 32, 1);
   }
   // sign board
-  g.fillStyle = C.boardFrame; g.fillRect(SIGN.x * TILE, 2, SIGN.w * TILE, 12);
-  g.fillStyle = C.board; g.fillRect(SIGN.x * TILE + 1, 3, SIGN.w * TILE - 2, 10);
-  // whiteboard on the top wall
-  g.fillStyle = C.boardFrame; g.fillRect(WHITEBOARD.x * TILE - 2, 1, WHITEBOARD.w * TILE + 2, 14);
-  g.fillStyle = C.board; g.fillRect(WHITEBOARD.x * TILE - 1, 2, WHITEBOARD.w * TILE, 11);
-  g.fillStyle = C.tray; g.fillRect(WHITEBOARD.x * TILE - 1, 13, WHITEBOARD.w * TILE, 2);
-  // meeting rooms: glass walls + door + table + chairs
+  g.fillStyle = C.boardFrame; g.fillRect(SIGN.x * TILE, -9, SIGN.w * TILE, 12);
+  g.fillStyle = C.board; g.fillRect(SIGN.x * TILE + 1, -8, SIGN.w * TILE - 2, 10);
+  // partitions: north–south runs first, so east–west faces cover the junctions
+  for (const wl of WALLS) if (wl.dir === 'v') drawWallV(g, wl);
+  for (const wl of WALLS) if (wl.dir === 'h') drawWallH(g, wl);
+  // meeting rooms: table + chairs
   for (const r of ROOMS) {
-    const gx = (r.x + r.w) * TILE, gy = (r.y + r.h) * TILE;
-    g.fillStyle = C.glass; g.fillRect(gx + 5, r.y * TILE, 6, r.h * TILE + TILE); g.fillRect(r.x * TILE, gy + 5, r.w * TILE + TILE, 6);
-    g.fillStyle = C.glassFrame; g.fillRect(gx + 5, r.y * TILE, 1, r.h * TILE + TILE); g.fillRect(gx + 10, r.y * TILE, 1, r.h * TILE + TILE);
-    g.fillRect(r.x * TILE, gy + 5, r.w * TILE + TILE, 1); g.fillRect(r.x * TILE, gy + 10, r.w * TILE + TILE, 1);
-    g.fillStyle = C.glassDark; for (let y = r.y * TILE; y < gy + TILE; y += TILE) g.fillRect(gx + 5, y, 6, 1);
-    // door gap
-    g.fillStyle = C.meet; g.fillRect(gx, r.door.y * TILE, TILE, TILE);
-    g.fillStyle = C.door; g.fillRect(gx + 6, r.door.y * TILE + 1, 4, TILE - 2);
     drawMeetingTable(g, r.table.x * TILE, r.table.y * TILE, r.table.w * TILE, r.table.h * TILE);
     for (const s of r.seats) drawChair(g, s.x * TILE, s.y * TILE, s.y < r.table.y ? 'down' : s.y >= r.table.y + r.table.h ? 'up' : 'side');
     drawChair(g, r.head.x * TILE, r.head.y * TILE, 'side', true);
   }
   // lobby: reception + door
   drawReception(g, RECEPTION.x * TILE, RECEPTION.y * TILE, RECEPTION.w * TILE);
-  g.fillStyle = C.doorDark; g.fillRect(DOOR.x * TILE - 2, H - TILE, TILE + 4, TILE);
-  g.fillStyle = C.door; g.fillRect(DOOR.x * TILE, H - TILE + 2, TILE, TILE - 2);
-  g.fillStyle = '#ffd166'; g.fillRect(DOOR.x * TILE + 11, H - TILE + 8, 2, 2);
-  g.fillStyle = C.lobby2; g.fillRect(LOBBY.x * TILE, 13 * TILE, LOBBY.w * TILE, 1);
+  // front entrance: an opening in the bottom wall's cap, door frame posts on either side, doormat on the sill
+  g.fillStyle = C.lobby; g.fillRect(DOOR.x * TILE, H - TILE, TILE, TILE);
+  g.fillStyle = C.doorDark; g.fillRect(DOOR.x * TILE - 2, H - TILE, 2, TILE); g.fillRect(DOOR.x * TILE + TILE, H - TILE, 2, TILE);
+  g.fillStyle = C.door; g.fillRect(DOOR.x * TILE + 1, H - TILE + 3, TILE - 2, 10);
+  g.fillStyle = C.doorDark; for (let i = 0; i < 4; i++) g.fillRect(DOOR.x * TILE + 3, H - TILE + 5 + i * 2, TILE - 6, 1);
   // desks
   for (let i = 0; i < DESK_COUNT; i++) {
     const d = deskPos(i);
-    drawChair(g, d.chair.x * TILE, d.chair.y * TILE, 'down');
-    drawDesk(g, d.desk.x * TILE, d.desk.y * TILE, d.desk.w * TILE, (i & 1) === 1);
+    drawDeskChair(g, d.chair.x * TILE, d.chair.y * TILE, d.chair.face === 'right');
+    drawDesk(g, d.desk.x * TILE, d.desk.y * TILE, d.desk.w * TILE, d.desk.h * TILE, (i & 1) === 1);
   }
+  // play area
+  drawCatTree(g, CAT_TREE.x * TILE, CAT_TREE.y * TILE);
+  drawScratchPost(g, SCRATCH_POST.x * TILE, SCRATCH_POST.y * TILE);
+  drawBox(g, BOX.x * TILE, BOX.y * TILE);
+  drawCushion(g, CUSHION.x * TILE, CUSHION.y * TILE);
+  // planning room
+  drawStandingBoard(g, WHITEBOARD.x * TILE, WHITEBOARD.y * TILE, WHITEBOARD.w * TILE);
   // library
-  drawBookshelf(g, BOOKSHELF.x * TILE, BOOKSHELF.y * TILE, BOOKSHELF.h * TILE);
+  drawBookshelf(g, BOOKSHELF.x * TILE, BOOKSHELF.y * TILE, BOOKSHELF.w * TILE);
   // lounge
   drawSofa(g, SOFA.x * TILE, SOFA.y * TILE, SOFA.w * TILE);
-  g.fillStyle = C.table; g.fillRect(27 * TILE + 4, 16 * TILE + 2, 28, 10); g.fillStyle = C.tableEdge; g.fillRect(27 * TILE + 4, 16 * TILE + 11, 28, 2);
+  g.fillStyle = C.table; g.fillRect((SOFA.x + 1) * TILE - 12, 17 * TILE + 2, 24, 10); g.fillStyle = C.tableEdge; g.fillRect((SOFA.x + 1) * TILE - 12, 17 * TILE + 11, 24, 2);
   g.fillStyle = C.coffee; g.fillRect(COFFEE.x * TILE + 2, COFFEE.y * TILE + 1, 12, 14);
   g.fillStyle = C.coffee2; g.fillRect(COFFEE.x * TILE + 4, COFFEE.y * TILE + 3, 8, 4);
   g.fillStyle = '#fff'; g.fillRect(COFFEE.x * TILE + 6, COFFEE.y * TILE + 10, 4, 3);
@@ -186,10 +254,96 @@ export function buildBackground() {
   return c;
 }
 
+/** North–south partition: only its top shows. Glass is a rail with panes; plaster is a dark cap like the outer walls. */
+function drawWallV(g, wl) {
+  const x = wl.x * TILE;
+  for (let y = wl.y; y < wl.y + wl.len; y++) {
+    const py = y * TILE;
+    if (isDoor(wl.x, y)) { // open doorway: just the jambs
+      g.fillStyle = C.doorDark; g.fillRect(x + 4, py, 8, 2); g.fillRect(x + 4, py + TILE - 2, 8, 2);
+      continue;
+    }
+    if (wl.glass) {
+      g.fillStyle = C.glass; g.fillRect(x + 5, py, 6, TILE);
+      g.fillStyle = C.glassFrame; g.fillRect(x + 5, py, 1, TILE); g.fillRect(x + 10, py, 1, TILE);
+      g.fillStyle = C.glassDark; g.fillRect(x + 5, py, 6, 1);
+    } else {
+      g.fillStyle = C.wallTop; g.fillRect(x + 4, py, 8, TILE);
+      g.fillStyle = C.wallEdge; g.fillRect(x + 4, py, 1, TILE); g.fillRect(x + 11, py, 1, TILE);
+    }
+  }
+}
+/** East–west partition, facing the viewer: rail or cap on top, glass pane or wallpaper face, base, shadow on the floor. */
+function drawWallH(g, wl) {
+  for (let i = 0; i < wl.len; i++) {
+    const tx = wl.x + i, x = tx * TILE, y = wl.y * TILE;
+    if (isDoor(tx, wl.y)) { // open doorway: jambs + threshold
+      g.fillStyle = C.doorDark; g.fillRect(x, y, 2, 14); g.fillRect(x + TILE - 2, y, 2, 14);
+      g.fillStyle = C.door; g.fillRect(x + 2, y + 13, TILE - 4, 2);
+      continue;
+    }
+    if (wl.glass) {
+      g.fillStyle = C.glass; g.fillRect(x, y + 2, TILE, 11);
+      if (tx % 3 === 0) { g.fillStyle = 'rgba(255,255,255,0.55)'; g.fillRect(x + 8, y + 4, 2, 1); g.fillRect(x + 7, y + 5, 2, 1); g.fillRect(x + 6, y + 6, 2, 1); }
+      g.fillStyle = C.glassDark; g.fillRect(x, y + 2, 1, 11);
+      g.fillStyle = C.glassFrame; g.fillRect(x, y, TILE, 2);
+      g.fillStyle = C.glassDark; g.fillRect(x, y + 13, TILE, 2);
+    } else {
+      g.fillStyle = C.wallFace; g.fillRect(x, y, TILE, 14);
+      g.fillStyle = C.wallStripe; for (let k = 0; k < TILE; k += 4) g.fillRect(x + k, y + 3, 1, 5);
+      g.fillStyle = C.wainscot; g.fillRect(x, y + 8, TILE, 6);
+      g.fillStyle = C.trim; g.fillRect(x, y + 8, TILE, 1);
+      g.fillStyle = C.wallTop; g.fillRect(x, y, TILE, 3); g.fillRect(x, y + 14, TILE, 2);
+    }
+    g.fillStyle = C.floorShade; g.fillRect(x, y + TILE, TILE, 2);
+  }
+}
 function drawPlant(g, x, y) {
   g.fillStyle = C.pot; g.fillRect(x + 5, y + 10, 6, 5);
   g.fillStyle = C.plantDark; g.fillRect(x + 3, y + 4, 10, 7);
   g.fillStyle = C.plant; g.fillRect(x + 4, y + 2, 8, 7); g.fillRect(x + 2, y + 6, 3, 3); g.fillRect(x + 11, y + 5, 3, 3);
+}
+/** Cat tree: carpeted base, sisal post, a low side shelf and a top perch rising above its tile (a perched cat sits at y - 11). */
+function drawCatTree(g, x, y) {
+  g.fillStyle = C.shadow; g.fillRect(x + 1, y + 14, 14, 2);
+  g.fillStyle = '#d9c7a3'; g.fillRect(x + 6, y - 9, 4, 22);
+  g.fillStyle = '#b8a47e'; for (let k = -8; k < 13; k += 3) g.fillRect(x + 6, y + k, 4, 1);
+  g.fillStyle = '#8f74b8'; g.fillRect(x + 1, y + 12, 14, 3); g.fillRect(x, y - 12, 16, 3); g.fillRect(x + 9, y + 2, 6, 2);
+  g.fillStyle = '#a58bc8'; g.fillRect(x + 1, y + 12, 14, 1); g.fillRect(x, y - 12, 16, 1); g.fillRect(x + 9, y + 2, 6, 1);
+  g.fillStyle = '#e05a7a'; g.fillRect(x + 3, y - 9, 1, 4); g.fillRect(x + 2, y - 5, 3, 2); // dangling toy
+}
+/** Scratching post on a square base. */
+function drawScratchPost(g, x, y) {
+  g.fillStyle = C.shadow; g.fillRect(x + 2, y + 14, 12, 2);
+  g.fillStyle = '#7a5236'; g.fillRect(x + 2, y + 11, 12, 4);
+  g.fillStyle = '#d9c7a3'; g.fillRect(x + 5, y - 4, 6, 15);
+  g.fillStyle = '#b8a47e'; for (let k = -3; k < 11; k += 2) g.fillRect(x + 5, y + k, 6, 1);
+  g.fillStyle = '#7a5236'; g.fillRect(x + 4, y - 6, 8, 2);
+}
+/** Cardboard box with open flaps. frontOnly redraws just the front panel, over a cat sitting inside. */
+export function drawBox(g, x, y, frontOnly = false) {
+  if (!frontOnly) {
+    g.fillStyle = C.shadow; g.fillRect(x + 1, y + 14, 14, 2);
+    g.fillStyle = '#d9a86c'; g.fillRect(x - 1, y + 3, 3, 4); g.fillRect(x + 14, y + 3, 3, 4); // flaps
+    g.fillStyle = '#6e4a2e'; g.fillRect(x + 2, y + 4, 12, 4); // inside
+  }
+  g.fillStyle = '#c08a55'; g.fillRect(x + 1, y + 7, 14, 8);
+  g.fillStyle = '#d9a86c'; g.fillRect(x + 1, y + 7, 14, 1);
+  g.fillStyle = '#e8d3a8'; g.fillRect(x + 7, y + 8, 2, 6); // tape
+}
+/** Round floor cushion. */
+function drawCushion(g, x, y) {
+  g.fillStyle = C.shadow; g.fillRect(x + 2, y + 14, 12, 2);
+  g.fillStyle = '#a8435a'; g.fillRect(x + 2, y + 7, 12, 7); g.fillRect(x + 1, y + 9, 14, 3);
+  g.fillStyle = '#c7546b'; g.fillRect(x + 3, y + 8, 10, 4);
+  g.fillStyle = '#d97a8e'; g.fillRect(x + 5, y + 9, 6, 2);
+}
+/** Office chair in profile: backrest behind the cat, seat cushion at y + 10 (the seated cat rests on it), post + base below. */
+function drawDeskChair(g, x, y, backLeft) {
+  g.fillStyle = C.shadow; g.fillRect(x + 2, y + 14, 12, 2);
+  g.fillStyle = C.chair; g.fillRect(backLeft ? x + 2 : x + 11, y + 4, 3, 9); g.fillRect(x + 3, y + 10, 10, 3);
+  g.fillStyle = C.chairLight; g.fillRect(x + 4, y + 10, 8, 1);
+  g.fillStyle = '#3a3d55'; g.fillRect(x + 7, y + 13, 2, 2); g.fillRect(x + 4, y + 15, 8, 1);
 }
 function drawChair(g, x, y, facing = 'down', head = false) {
   g.fillStyle = C.shadow; g.fillRect(x + 2, y + 13, 12, 3);
@@ -199,37 +353,82 @@ function drawChair(g, x, y, facing = 'down', head = false) {
   else { g.fillRect(x + 2, y + 3, 3, 10); g.fillRect(x + 5, y + 3, 9, 10); }
   g.fillStyle = head ? '#8e6cc4' : C.chairLight; g.fillRect(x + 5, y + 5, 7, 6);
 }
-function drawDesk(g, x, y, w, rightHalf) {
-  g.fillStyle = C.shadow; g.fillRect(x + 1, y + 13, w, 3);
-  g.fillStyle = C.desk; g.fillRect(x, y + 1, w, 12);
-  g.fillStyle = C.deskEdge; g.fillRect(x, y + 12, w, 2); g.fillRect(x, y + 1, w, 1);
-  if (!rightHalf) { g.fillStyle = C.divider; g.fillRect(x + w - 1, y + 1, 1, 12); }
+/** Desk in 3/4 view: top surface, a lit lip, then a 5px front face with a drawer. w × h is its footprint in px. */
+function drawDesk(g, x, y, w, h, rightHalf) {
+  const top = h - 6;
+  g.fillStyle = C.shadow; g.fillRect(x + 1, y + h, w, 3);
+  g.fillStyle = C.desk; g.fillRect(x, y, w, top);
+  g.fillStyle = C.deskFaceDark; g.fillRect(x, y, w, 1);
+  g.fillStyle = C.deskLip; g.fillRect(x, y + top, w, 1);
+  g.fillStyle = C.deskFace; g.fillRect(x, y + top + 1, w, 5);
+  g.fillStyle = C.deskFaceDark; g.fillRect(x, y + h - 1, w, 1);
+  // drawer, legs at both ends
+  const dxr = x + Math.floor((w - 12) / 2), fy = y + top + 2;
+  g.fillRect(dxr, fy, 12, 1); g.fillRect(dxr, fy, 1, 3); g.fillRect(dxr + 11, fy, 1, 3);
+  g.fillStyle = C.deskLip; g.fillRect(dxr + 5, fy + 1, 2, 1);
+  g.fillStyle = C.deskFaceDark; g.fillRect(x, y + top + 1, 1, 5); g.fillRect(x + w - 1, y + top + 1, 1, 5);
+  if (!rightHalf) { g.fillStyle = C.divider; g.fillRect(x + w - 1, y, 1, top); }
 }
+/** Meeting table in 3/4 view: top surface with an inset, a lit lip, then a 5px front face. */
 function drawMeetingTable(g, x, y, w, h) {
-  g.fillStyle = C.shadow; g.fillRect(x + 2, y + h - 2, w, 4);
-  g.fillStyle = C.table; g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  g.fillStyle = C.tableEdge; g.fillRect(x + 1, y + h - 3, w - 2, 2); g.fillRect(x + 1, y + 1, w - 2, 1);
-  g.fillStyle = '#a6744c'; g.fillRect(x + 3, y + 3, w - 6, h - 7);
+  g.fillStyle = C.shadow; g.fillRect(x + 2, y + h, w - 2, 3);
+  g.fillStyle = C.table; g.fillRect(x + 1, y, w - 2, h - 6);
+  g.fillStyle = C.tableEdge; g.fillRect(x + 1, y, w - 2, 1);
+  g.fillStyle = '#a6744c'; g.fillRect(x + 4, y + 3, w - 8, h - 12);
+  g.fillStyle = '#b8845a'; g.fillRect(x + 1, y + h - 6, w - 2, 1);
+  g.fillStyle = C.tableFace; g.fillRect(x + 1, y + h - 5, w - 2, 5);
+  g.fillStyle = C.tableEdge; g.fillRect(x + 1, y + h - 1, w - 2, 1); g.fillRect(x + 1, y + h - 5, 1, 5); g.fillRect(x + w - 2, y + h - 5, 1, 5);
 }
-function drawReception(g, x, y, w) {
-  g.fillStyle = C.shadow; g.fillRect(x + 1, y + 13, w, 3);
-  g.fillStyle = C.recept; g.fillRect(x, y + 2, w, 11);
-  g.fillStyle = C.receptTop; g.fillRect(x, y + 2, w, 3);
-  g.fillStyle = '#fff'; g.fillRect(x + w - 8, y + 6, 5, 4); g.fillStyle = '#2ecc71'; g.fillRect(x + 4, y + 7, 3, 2);
+/** Reception counter: tiled top with a monitor and a lamp, then a paneled front face. */
+export function drawReception(g, x, y, w, shadow = true) {
+  if (shadow) { g.fillStyle = C.shadow; g.fillRect(x + 1, y + TILE, w, 3); }
+  g.fillStyle = C.receptTop; g.fillRect(x, y + 1, w, 7);
+  g.fillStyle = C.recept; g.fillRect(x, y + 1, w, 1);
+  g.fillStyle = '#b3c2df'; g.fillRect(x, y + 8, w, 1);
+  g.fillStyle = C.recept; g.fillRect(x, y + 9, w, 7);
+  g.fillStyle = C.receptDark; g.fillRect(x, y + 15, w, 1);
+  for (let i = 0; i < w; i += 12) { g.fillRect(x + i + 2, y + 10, 8, 1); g.fillRect(x + i + 2, y + 10, 1, 4); }
+  g.fillStyle = '#fff'; g.fillRect(x + w - 9, y + 2, 6, 4); g.fillStyle = '#2ecc71'; g.fillRect(x + 4, y + 3, 3, 2);
 }
-function drawBookshelf(g, x, y, h) {
-  g.fillStyle = C.shelfDark; g.fillRect(x + 1, y, 14, h);
-  g.fillStyle = C.shelf; g.fillRect(x + 2, y + 1, 12, h - 2);
-  for (let row = 0; row < h / 16; row++) {
-    const by = y + 3 + row * 16;
-    for (let i = 0; i < 5; i++) { g.fillStyle = C.book[(i + row) % C.book.length]; g.fillRect(x + 3 + i * 2, by + (i % 2), 2, 9 - (i % 2)); }
-    g.fillStyle = C.shelfDark; g.fillRect(x + 2, by + 11, 12, 1);
+/** Bookshelf against the right wall: its top runs north–south, rising above its tiles; the south end shows a front panel. */
+/** Low bookshelf seen from the front: top board, two rows of spines, plinth. Fits its tile row so readers above it stay clear. */
+function drawBookshelf(g, x, y, w) {
+  g.fillStyle = '#9a6538'; g.fillRect(x, y, w, 2);
+  g.fillStyle = C.shelfDark; g.fillRect(x, y + 2, w, 14);
+  g.fillStyle = C.shelf; g.fillRect(x + 1, y + 3, w - 2, 5); g.fillRect(x + 1, y + 9, w - 2, 5);
+  for (const [ry, rh] of [[3, 5], [9, 5]]) {
+    for (let bx = x + 2, i = (ry * 7) % C.book.length; bx < x + w - 3; i++) {
+      const bw = 2 + (i % 3 === 0 ? 1 : 0), bh = rh - (i % 4 === 1 ? 1 : 0);
+      g.fillStyle = C.book[i % C.book.length]; g.fillRect(bx, y + ry + rh - bh, bw, bh);
+      bx += bw + (i % 5 === 4 ? 2 : 0);
+    }
   }
+  for (let k = TILE; k < w; k += TILE * 2) { g.fillStyle = C.shelfDark; g.fillRect(x + k, y + 2, 1, 12); } // uprights
+  g.fillStyle = C.shelfDark; g.fillRect(x, y + 14, w, 2);
 }
+/** Free-standing whiteboard on two legs, rising above its tile (planners stand on the row below). */
+function drawStandingBoard(g, x, y, w) {
+  g.fillStyle = C.shadow; g.fillRect(x + 1, y + 14, w - 2, 2);
+  g.fillStyle = '#6f6f6f'; g.fillRect(x + 4, y + 7, 2, 8); g.fillRect(x + w - 6, y + 7, 2, 8);
+  g.fillRect(x + 2, y + 14, 6, 1); g.fillRect(x + w - 8, y + 14, 6, 1);
+  g.fillStyle = C.boardFrame; g.fillRect(x, y - 9, w, 16);
+  g.fillStyle = C.board; g.fillRect(x + 1, y - 8, w - 2, 13);
+  g.fillStyle = C.tray; g.fillRect(x + 1, y + 6, w - 2, 2);
+  g.fillStyle = '#e74c3c'; g.fillRect(x + 4, y + 6, 3, 1); g.fillStyle = '#2563eb'; g.fillRect(x + 9, y + 6, 3, 1);
+}
+/** Sofa from the front: backrest on top, seat cushions, then the seat's front face, with armrests at both ends. */
 function drawSofa(g, x, y, w) {
-  g.fillStyle = C.shadow; g.fillRect(x + 1, y + 13, w, 3);
-  g.fillStyle = C.sofaDark; g.fillRect(x, y + 2, w, 12);
-  g.fillStyle = C.sofa; g.fillRect(x + 2, y + 5, w - 4, 8);
-  g.fillStyle = C.sofaLight; g.fillRect(x + 2, y + 2, w - 4, 3);
-  for (let i = 1; i < w / 16; i++) { g.fillStyle = C.sofaDark; g.fillRect(x + i * 16, y + 5, 1, 8); }
+  g.fillStyle = C.shadow; g.fillRect(x + 1, y + TILE, w, 3);
+  g.fillStyle = C.sofaDark; g.fillRect(x, y, w, 2);
+  g.fillStyle = C.sofa; g.fillRect(x + 1, y + 1, w - 2, 6);
+  g.fillStyle = C.sofaLight; g.fillRect(x + 4, y + 7, w - 8, 4);
+  g.fillStyle = C.sofaDark; g.fillRect(x + 4, y + 11, w - 8, 1);
+  for (let i = 1; i < w / 16; i++) g.fillRect(x + i * 16, y + 7, 1, 4);
+  g.fillStyle = C.sofa; g.fillRect(x + 4, y + 12, w - 8, 4);
+  g.fillStyle = C.sofaDark; g.fillRect(x + 4, y + 15, w - 8, 1);
+  for (const ax of [x, x + w - 4]) {
+    g.fillStyle = C.sofaLight; g.fillRect(ax, y + 4, 4, 2);
+    g.fillStyle = C.sofa; g.fillRect(ax, y + 6, 4, 10);
+    g.fillStyle = C.sofaDark; g.fillRect(ax, y + 15, 4, 1);
+  }
 }

@@ -11,7 +11,7 @@ export const EV_ICON = {
   SubagentStart: '🧢', SubagentStop: '🧢', PostToolUseFailure: '⚠️', PreModelSwitch: '🔁', PostModelSwitch: '🔁',
 };
 const MODE_LABEL = { plan: '계획', auto: '자동', bypassPermissions: '자동 (bypass)', dontAsk: '자동 (dontAsk)', acceptEdits: '편집 승인', default: '기본' };
-const BUSY = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
+export const BUSY = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read']);
 
@@ -139,11 +139,7 @@ export class Panel {
     this.setComposeMsg(force ? '터미널을 닫는 중…' : '퇴근 지시 중…');
     const id = s.id;
     try {
-      const r = await fetch(`/sessions/${encodeURIComponent(id)}/close`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      await closeSession(id, force);
       if (this.id === id) this.setComposeMsg(force ? '터미널을 닫았습니다.' : '퇴근합니다 👋', 'ok');
     } catch (e) {
       if (this.id === id) this.setComposeMsg(e.message, 'err');
@@ -277,6 +273,15 @@ export function bgSummary(s) {
   const t = tasks[0];
   const what = t.command || t.description || t.type || '작업';
   return `백그라운드 작업 대기 · ${what}${tasks.length > 1 ? ` 외 ${tasks.length - 1}개` : ''}`;
+}
+
+/** Send a session home. force: close its Orca terminal tab instead of typing /exit (it isn't idle). */
+export async function closeSession(id, force) {
+  const r = await fetch(`/sessions/${encodeURIComponent(id)}/close`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
 }
 
 export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

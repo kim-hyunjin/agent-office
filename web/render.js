@@ -1,5 +1,5 @@
-import { TILE, W, H, DESK_COUNT, deskPos, ROOMS, WHITEBOARD, PLAN_ZONE, LOUNGE, LOBBY, LIBRARY_ZONE, SIGN } from './tilemap.js';
-import { sprite, outline, OUTLINE_W, animFor, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
+import { TILE, W, H, WALL_RISE, DESK_COUNT, deskPos, ROOMS, WHITEBOARD, SIGN, DOOR, LOBBY, RECEPTION, RECEPTIONIST, drawReception, YARN, BOX, drawBox, WHEEL } from './tilemap.js';
+import { sprite, outline, OUTLINE_W, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
@@ -14,18 +14,17 @@ export const STATE_COLOR = {
   idle: '#8e9aaf', thinking: '#a78bfa', reading: '#60a5fa', coding: '#3b82f6', terminal: '#22c55e', searching: '#06b6d4',
   delegating: '#f59e0b', working: '#e5e7eb', waiting: '#fbbf24', offduty: '#6b7280',
 };
-const MODE_LABEL = { plan: '계획', auto: '자동', bypassPermissions: '자동', dontAsk: '자동', acceptEdits: '편집 승인', default: '' };
 const AUTO_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']);
 const BUBBLE_MS = 15000;
 /** Screen-space font size: scales with the canvas but never below a readable floor. */
 const fpx = (k, S) => Math.max(13, k * S);
-const PLACE_LABEL = { meeting: (st) => ROOMS[st.room].name, plan: () => '기획 보드', library: () => '서가', lounge: () => '라운지', bullpen: () => '로비', exit: () => '퇴근 중' };
 
 export function render(ctx, S, world, now) {
   const { bg, ents, sessions, hoverKey, selectedKey } = world;
-  ctx.setTransform(S, 0, 0, S, 0, 0);
+  // office space starts WALL_RISE below the canvas top; the band above is the raised top wall
+  ctx.setTransform(S, 0, 0, S, 0, WALL_RISE * S);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bg, 0, 0);
+  ctx.drawImage(bg, 0, -WALL_RISE);
 
   // who is at which desk right now
   const atDesk = new Map();
@@ -41,82 +40,91 @@ export function render(ctx, S, world, now) {
     const st = e.station;
     const state = e.data?.state || 'idle';
     if (st.y < r.table.y) drawMiniLaptop(ctx, st.x * TILE + 4, r.table.y * TILE + 1, state, now);
-    else if (st.y >= r.table.y + r.table.h) drawMiniLaptop(ctx, st.x * TILE + 4, (r.table.y + r.table.h) * TILE - 8, state, now);
-    else if (st.x < r.table.x) drawMiniLaptop(ctx, r.table.x * TILE + 1, st.y * TILE + 4, state, now);
-    else if (st.x >= r.table.x + r.table.w) drawMiniLaptop(ctx, (r.table.x + r.table.w) * TILE - 10, st.y * TILE + 4, state, now);
+    else if (st.y >= r.table.y + r.table.h) drawMiniLaptop(ctx, st.x * TILE + 4, (r.table.y + r.table.h) * TILE - 13, state, now); // on the top surface, above the front face
+    else if (st.x < r.table.x) drawMiniLaptop(ctx, r.table.x * TILE + 1, st.y * TILE + 2, state, now);
+    else if (st.x >= r.table.x + r.table.w) drawMiniLaptop(ctx, (r.table.x + r.table.w) * TILE - 10, st.y * TILE + 2, state, now);
   }
   // whiteboard scribbles while someone is planning
   const planners = [...ents.values()].filter((e) => e.station?.kind === 'plan' && e.phase === 'seated');
   drawWhiteboard(ctx, planners.length, now);
+  drawReceptionist(ctx, ents, now);
+  drawYarn(ctx, ents, now);
+  drawWheel(ctx, ents, now);
 
   const list = [...ents.values()].sort((a, b) => a.y - b.y);
   for (const e of list) drawEntity(ctx, e, now, e.key === selectedKey, e.key === hoverKey);
 
   // screen-space text
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, WALL_RISE * S);
   drawSign(ctx, S);
-  drawZoneLabels(ctx, S, world);
-  for (const s of sessions.values()) drawNameplate(ctx, S, s, ents.get(s.id));
-  for (const e of list) drawEntityCaption(ctx, S, e);
   const placed = [];
   for (const e of list) drawBubble(ctx, S, e, now, placed);
-  drawHUD(ctx, S, world, now);
   drawLegend(ctx, S, world, now);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // HUD hangs on the raised wall
+  drawHUD(ctx, S, world, now);
 }
 
 // ---- furniture state ------------------------------------------------------------
+/**
+ * Props on a lengthwise desk (1 tile wide, 2 deep). Top tile: keyboard upright along the chair's edge, monitor beside
+ * it (screen toward the viewer). Bottom tile: mouse under the keyboard, mug / papers / phone by state.
+ */
 function drawDeskProps(g, d, state, t, fam = 'other', mode = null) {
-  const dx = d.desk.x * TILE, dy = d.desk.y * TILE;
+  const x = d.desk.x * TILE, dy = d.desk.y * TILE;
   const kind = (FAMILIES[fam] || FAMILIES.other).monitor;
-  const mx = dx + 8; // monitor block origin (desk is 48 wide; monitor on the left-center, keyboard right)
+  const chairLeft = d.chair.face === 'right';
+  const kx = chairLeft ? x + 1 : x + 12; // keyboard column (3 px)
+  const mx = chairLeft ? x + 4 : x; // monitor box (12 px)
+  // keyboard + mouse, upright
+  g.fillStyle = '#50545e'; g.fillRect(kx, dy + 2, 3, 11);
+  g.fillStyle = '#6b6f7a'; for (let i = 0; i < 5; i++) g.fillRect(kx + 1, dy + 3 + i * 2, 1, 1);
+  g.fillStyle = '#50545e'; g.fillRect(kx, dy + 15, 3, 2);
+  // monitor
   if (kind === 'wide-gold') {
-    g.fillStyle = '#d4a017'; g.fillRect(mx, dy + 1, 16, 10);
-    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 1, dy + 2, 14, 8);
-    g.fillStyle = '#d4a017'; g.fillRect(mx + 7, dy + 11, 3, 1);
+    g.fillStyle = '#d4a017'; g.fillRect(mx, dy + 1, 12, 10);
+    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 1, dy + 2, 10, 8);
+    g.fillStyle = '#d4a017'; g.fillRect(mx + 5, dy + 11, 2, 2);
   } else if (kind === 'silver') {
-    g.fillStyle = '#c8d0d8'; g.fillRect(mx + 1, dy + 2, 14, 9);
-    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 2, dy + 3, 12, 7);
-    g.fillStyle = '#9aa3b2'; g.fillRect(mx + 7, dy + 11, 3, 1);
+    g.fillStyle = '#c8d0d8'; g.fillRect(mx + 1, dy + 2, 11, 9);
+    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 2, dy + 3, 9, 7);
+    g.fillStyle = '#9aa3b2'; g.fillRect(mx + 6, dy + 11, 2, 2);
   } else if (kind === 'laptop') {
-    g.fillStyle = '#2c2c36'; g.fillRect(mx + 4, dy + 4, 9, 6);
-    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 5, dy + 5, 7, 4);
-    g.fillStyle = '#44454f'; g.fillRect(mx + 3, dy + 10, 11, 2);
+    g.fillStyle = '#2c2c36'; g.fillRect(mx + 2, dy + 4, 9, 6);
+    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 3, dy + 5, 7, 4);
+    g.fillStyle = '#44454f'; g.fillRect(mx + 1, dy + 10, 11, 2);
   } else {
-    g.fillStyle = '#23242e'; g.fillRect(mx + 2, dy + 2, 13, 9);
-    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 3, dy + 3, 11, 7);
-    g.fillStyle = '#3a3b47'; g.fillRect(mx + 7, dy + 11, 3, 1);
+    g.fillStyle = '#23242e'; g.fillRect(mx + 1, dy + 2, 11, 9);
+    g.fillStyle = SCREEN[state] || SCREEN.idle; g.fillRect(mx + 2, dy + 3, 9, 7);
+    g.fillStyle = '#3a3b47'; g.fillRect(mx + 6, dy + 11, 2, 2);
   }
-  const sx = kind === 'wide-gold' ? mx + 2 : kind === 'laptop' ? mx + 6 : mx + 4;
+  const sx = kind === 'wide-gold' ? mx + 2 : kind === 'laptop' ? mx + 4 : mx + 3;
   const sy = kind === 'wide-gold' ? dy + 3 : kind === 'laptop' ? dy + 6 : dy + 4;
   const rowsN = kind === 'laptop' ? 2 : 3;
-  const maxW = kind === 'laptop' ? 5 : kind === 'wide-gold' ? 9 : 7;
+  const maxW = kind === 'laptop' ? 4 : kind === 'wide-gold' ? 7 : 6;
   if (state === 'coding' || state === 'terminal' || state === 'working') {
     g.fillStyle = state === 'coding' ? '#bcd4ff' : state === 'terminal' ? '#5dff7a' : '#8a94a6';
     const sc = Math.floor(t / (AUTO_MODES.has(mode) ? 200 : 350)) % 3;
     const widths = [6, 4, 7, 3, 5];
     for (let i = 0; i < rowsN; i++) g.fillRect(sx, sy + i * 2, Math.min(maxW, widths[(i + sc) % widths.length]), 1);
   } else if (state === 'searching') {
-    g.fillStyle = '#9bd3ff'; g.fillRect(sx + 1, sy + 1, Math.min(maxW, 5), 1); g.fillRect(sx + 1, sy + 3, Math.min(maxW, 7), 1);
+    g.fillStyle = '#9bd3ff'; g.fillRect(sx, sy + 1, Math.min(maxW, 5), 1); g.fillRect(sx, sy + 3, maxW, 1);
   } else if (state === 'reading') {
-    g.fillStyle = '#4a5068'; g.fillRect(sx + 1, sy + 1, Math.min(maxW, 7), 1); g.fillRect(sx + 1, sy + 3, Math.min(maxW, 5), 1);
+    g.fillStyle = '#4a5068'; g.fillRect(sx, sy + 1, maxW, 1); g.fillRect(sx, sy + 3, Math.min(maxW, 5), 1);
   } else if (state === 'waiting' && Math.floor(t / 400) % 2) {
-    g.fillStyle = '#ffd166'; g.fillRect(sx + 4, sy, 1, 3); g.fillRect(sx + 4, sy + 4, 1, 1);
+    g.fillStyle = '#ffd166'; g.fillRect(sx + 3, sy, 1, 3); g.fillRect(sx + 3, sy + 4, 1, 1);
   }
-  // keyboard + mouse
-  g.fillStyle = '#50545e'; g.fillRect(dx + 27, dy + 5, 11, 3);
-  g.fillStyle = '#6b6f7a'; for (let i = 0; i < 5; i++) g.fillRect(dx + 28 + i * 2, dy + 6, 1, 1);
-  g.fillStyle = '#50545e'; g.fillRect(dx + 40, dy + 5, 3, 3);
-  // left side: mode / state props
-  if (mode === 'acceptEdits' && state !== 'offduty') drawGlyph(g, 'check', dx + 2, dy + 4, t);
+  // bottom tile: mode / state props
+  const px = mx + 2, py = dy + 15;
+  if (mode === 'acceptEdits' && state !== 'offduty') drawGlyph(g, 'check', px + 4, py, t);
   if (state === 'idle' || state === 'offduty') {
-    g.fillStyle = '#fafafa'; g.fillRect(dx + 44, dy + 9, 3, 3); g.fillStyle = '#6f4e37'; g.fillRect(dx + 44, dy + 9, 3, 1);
+    g.fillStyle = '#fafafa'; g.fillRect(px + 3, py + 2, 3, 3); g.fillStyle = '#6f4e37'; g.fillRect(px + 3, py + 2, 3, 1);
   } else if (state === 'reading' || state === 'searching') {
-    g.fillStyle = '#fdfdfd'; g.fillRect(dx + 1, dy + 7, 6, 5); g.fillStyle = '#9aa3b2'; g.fillRect(dx + 2, dy + 8, 3, 1); g.fillRect(dx + 2, dy + 10, 3, 1);
-    if (state === 'searching') { const bob = Math.floor(t / 300) % 2; g.fillStyle = '#e8eef5'; g.fillRect(dx + 44, dy + 3 - bob, 3, 3); g.fillStyle = '#5a3825'; g.fillRect(dx + 43, dy + 6 - bob, 1, 2); }
+    g.fillStyle = '#fdfdfd'; g.fillRect(px, py + 1, 6, 5); g.fillStyle = '#9aa3b2'; g.fillRect(px + 1, py + 2, 3, 1); g.fillRect(px + 1, py + 4, 3, 1);
+    if (state === 'searching') { const bob = Math.floor(t / 300) % 2; g.fillStyle = '#e8eef5'; g.fillRect(px + 6, py - bob, 3, 3); g.fillStyle = '#5a3825'; g.fillRect(px + 5, py + 3 - bob, 1, 2); }
   } else if (state === 'delegating') {
-    g.fillStyle = '#2d2d2d'; g.fillRect(dx + 1, dy + 8, 6, 3); g.fillStyle = '#ffd166'; g.fillRect(dx + 2 + (Math.floor(t / 250) % 3) * 2, dy + 9, 1, 1);
+    g.fillStyle = '#2d2d2d'; g.fillRect(px, py + 2, 6, 3); g.fillStyle = '#ffd166'; g.fillRect(px + 1 + (Math.floor(t / 250) % 3) * 2, py + 3, 1, 1);
   } else if (state === 'waiting') {
-    g.fillStyle = '#fdfdfd'; g.fillRect(dx + 1, dy + 7, 6, 5); g.fillStyle = '#e74c3c'; g.fillRect(dx + 2, dy + 8, 4, 1);
+    g.fillStyle = '#fdfdfd'; g.fillRect(px, py + 1, 6, 5); g.fillStyle = '#e74c3c'; g.fillRect(px + 1, py + 2, 4, 1);
   }
 }
 
@@ -129,7 +137,8 @@ function drawMiniLaptop(g, x, y, state, t) {
 
 function drawWhiteboard(g, planners, t) {
   if (!planners) return;
-  const bx = WHITEBOARD.x * TILE + 2, by = 3;
+  const bx = WHITEBOARD.x * TILE + 2, by = WHITEBOARD.y * TILE - 6;
+  const k = (WHITEBOARD.w * TILE - 4) / 76; // strokes are laid out for a 76px-wide board
   const phase = (t % 9000) / 9000;
   const strokes = [
     ['#2563eb', 0, 1, 18, 1], ['#2563eb', 0, 3, 12, 1], ['#dc2626', 22, 1, 10, 1], ['#dc2626', 22, 3, 14, 1],
@@ -137,8 +146,57 @@ function drawWhiteboard(g, planners, t) {
     ['#111827', 58, 1, 1, 4], ['#111827', 70, 1, 1, 4], ['#111827', 58, 1, 13, 1], ['#111827', 58, 4, 13, 1],
   ];
   const n = Math.floor(phase * (strokes.length + 2));
-  strokes.slice(0, n).forEach(([c, x, y, w, h]) => { g.fillStyle = c; g.fillRect(bx + x, by + y, w, h); });
+  strokes.slice(0, n).forEach(([c, x, y, w, h]) => { g.fillStyle = c; g.fillRect(bx + Math.round(x * k), by + y, Math.max(1, Math.round(w * k)), h); });
 }
+
+/** Resident cat behind the lobby counter; waves while someone is walking in. The counter is redrawn over its lower body. */
+function drawReceptionist(g, ents, t) {
+  const greeting = [...ents.values()].some((e) => e.phase === 'enter' && e.y >= LOBBY.y * TILE);
+  const img = sprite(RECEPTIONIST_PAL, greeting ? 'wait' : 'idle', Math.floor(t / (greeting ? 400 : 450)));
+  const x = RECEPTIONIST.x * TILE + Math.round((TILE - img.width) / 2);
+  const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // bottom 4 rows tuck behind the counter
+  g.drawImage(img, x, y);
+  g.fillStyle = '#3a3d55'; g.fillRect(x + 1, y + 1, 6, 1); g.fillRect(x, y + 2, 1, 2); // headset band + earpiece
+  g.fillStyle = '#f2c94c'; g.fillRect(x + 1, y + 4, 2, 1); // mic
+  drawReception(g, RECEPTION.x * TILE, RECEPTION.y * TILE, RECEPTION.w * TILE, false); // shadow is already in the background
+}
+
+/** Yarn ball in the play area; it rolls back and forth while someone bats at it. */
+function drawYarn(g, ents, t) {
+  const batting = [...ents.values()].some((e) => e.phase === 'seated' && e.station?.act === 'bat');
+  const x = YARN.x * TILE + 2 + (batting ? Math.round(Math.abs(Math.sin(t / 260)) * 6) : 0), y = YARN.y * TILE + 10;
+  g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(x, y + 4, 5, 1);
+  g.fillStyle = '#e05a7a'; g.fillRect(x, y + 1, 5, 3); g.fillRect(x + 1, y, 3, 5);
+  g.fillStyle = '#f29ab0'; g.fillRect(x + 1, y + 1, 2, 1); g.fillRect(x + 2, y + 3, 2, 1);
+  g.fillStyle = '#e05a7a'; g.fillRect(x + 5, y + 4, 3, 1); // loose strand
+}
+
+/** Pixel ring + spokes; the spokes turn while a cat runs inside. The runner is drawn over it, on the rim's bottom. */
+function drawWheel(g, ents, t) {
+  const running = [...ents.values()].some((e) => e.phase === 'seated' && e.station?.act === 'wheel');
+  const cx = (WHEEL.x + 1) * TILE, cy = WHEEL.y * TILE + 1, r = 13;
+  const px = (x, y, w = 1, h = 1) => g.fillRect(Math.round(x), Math.round(y), w, h);
+  g.fillStyle = 'rgba(0,0,0,0.15)'; px(cx - 11, WHEEL.y * TILE + 14, 22, 2);
+  g.fillStyle = '#6b6f7a'; // A-frame stand
+  for (let k = 0; k <= 13; k++) { px(cx - k * 0.7, cy + k); px(cx + k * 0.7, cy + k); }
+  px(cx - 11, WHEEL.y * TILE + 14, 6, 1); px(cx + 5, WHEEL.y * TILE + 14, 6, 1);
+  const spin = running ? t / 140 : 0;
+  g.fillStyle = '#9fd3f0';
+  for (let s = 0; s < 6; s++) {
+    const a = spin + (s * Math.PI) / 3;
+    for (let k = 2; k < r - 1; k++) px(cx + Math.cos(a) * k, cy + Math.sin(a) * k);
+  }
+  for (let a = 0; a < Math.PI * 2; a += 0.04) { // rim: outer band + inner track
+    g.fillStyle = '#4aa3d8'; px(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    g.fillStyle = '#2f7fb0'; px(cx + Math.cos(a) * (r - 1), cy + Math.sin(a) * (r - 1));
+  }
+  g.fillStyle = '#e8f4ff'; px(cx - 1, cy - 1, 3, 3);
+}
+
+// what an idle cat does at each play spot
+const PLAY_ANIM = { perch: 'idle', scratch: 'scratch', bat: 'bat', box: 'idle', nap: 'sit', look: 'idle', wheel: 'walk' };
+// where the sprite's bottom sits within its tile: on a desk chair's seat, on top of the cat tree, low in the box, on the wheel's rim
+const SEAT_Y = { desk: 10, perch: -11, box: 12, wheel: 13 };
 
 // ---- entities ------------------------------------------------------------------
 function drawEntity(g, e, t, selected, hovered) {
@@ -146,34 +204,42 @@ function drawEntity(g, e, t, selected, hovered) {
   const state = e.phase === 'leave' ? 'offduty' : (data.state || 'idle');
   const moving = e.path && e.path.length > 0;
   const stationKind = e.phase === 'seated' ? e.station?.kind : null;
-  const anim = animFor(state, moving, stationKind);
+  const act = stationKind === 'play' ? e.station.act : null;
+  const anim = act ? PLAY_ANIM[act] : animFor(state, moving, stationKind);
   const auto = e.kind === 'employee' && AUTO_MODES.has(data.permissionMode);
-  const rate = anim === 'walk' ? 90 : anim === 'type' ? (auto ? 100 : 160) : anim === 'write' ? 500 : 450;
+  const rate = anim === 'walk' ? 90 : anim === 'type' ? (auto ? 100 : 160) : anim === 'bat' ? 260 : act === 'scratch' ? 240 : anim === 'write' ? 500 : 450;
   const frame = Math.floor((t + e.seed) / rate);
-  const img = sprite(e.pal, anim, frame);
+  // pacing follows the base animation; seats facing away from the viewer swap in back-view frames, desk chairs profile ones
+  const look = !stationKind ? anim : e.station.back ? backAnim(e.pal.kind, anim) : e.station.face ? sideAnim(e.pal.kind, anim) : anim;
+  const img = sprite(e.pal, look, frame);
+  const flip = (anim === 'walk' && e.dir < 0 && act !== 'wheel') || (stationKind && e.station.face === 'left');
   const isAsst = e.kind === 'assistant';
-  // centered on the tile, feet on the shadow line
-  const ox = Math.round((TILE - img.width) / 2), oy = 14 - img.height;
+  // centered on the tile, feet on the shadow line, unless it sits on something (SEAT_Y)
+  const seatY = SEAT_Y[act || stationKind] ?? 14;
+  // horizontally centered, except: paws against the post on the next tile, or centered in the 2-tile wheel
+  const ox = act === 'scratch' ? TILE + 5 - img.width : act === 'wheel' ? TILE - Math.round(img.width / 2) : Math.round((TILE - img.width) / 2);
+  const oy = seatY - img.height;
   const bob = !moving && (anim === 'idle' || anim === 'read' || anim === 'sit') && Math.floor((t + e.seed) / 700) % 2 ? 1 : 0;
   g.globalAlpha = e.alpha;
-  g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, img.width, 2);
+  if (seatY === 14) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, img.width, 2); } // furniture casts its own
   const ring = selected ? outline(img, '#ffd166') : hovered ? outline(img, 'rgba(255,255,255,0.7)') : null;
-  if (anim === 'walk' && e.dir < 0) {
-    g.save(); g.translate(e.x + ox + img.width, e.y + oy); g.scale(-1, 1);
+  if (flip) {
+    g.save(); g.translate(e.x + ox + img.width, e.y + oy + bob); g.scale(-1, 1);
     if (ring) g.drawImage(ring, -OUTLINE_W, -OUTLINE_W);
     g.drawImage(img, 0, 0); g.restore();
   } else {
     if (ring) g.drawImage(ring, e.x + ox - OUTLINE_W, e.y + oy + bob - OUTLINE_W);
     g.drawImage(img, e.x + ox, e.y + oy + bob);
   }
-  if (anim === 'sit' || stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
+  if (act === 'box') drawBox(g, BOX.x * TILE, BOX.y * TILE, true); // box front over the cat's lower body
+  if (stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
   // indicators above the head
   const gx = e.x + ox + Math.floor(img.width / 2) - 3, gy = e.y + oy - 4;
   if (!moving) {
     if (state === 'thinking') drawGlyph(g, 'dots', gx, gy, t + e.seed);
     else if (state === 'waiting') drawGlyph(g, 'bang', gx + 2, gy - 3, t);
     else if (state === 'terminal' || (state === 'idle' && (data.bgTasks?.length || data.awaitingShell))) drawGlyph(g, 'term', gx - 1, gy - 4, t + e.seed);
-    else if (state === 'idle' && !isAsst && stationKind !== 'lounge') drawGlyph(g, 'zzz', gx + 4, gy - 2, t + e.seed);
+    else if (act === 'nap') drawGlyph(g, 'zzz', gx + 4, gy - 2, t + e.seed);
     else if (state === 'delegating' && stationKind === 'desk' && e.planeTo) {
       const ph = ((t + e.seed) % 1600) / 1600;
       drawGlyph(g, 'plane', e.x + 8 + (e.planeTo.x - e.x - 8) * ph, e.y - 2 + (e.planeTo.y - e.y + 2) * ph - Math.sin(ph * Math.PI) * 8, t);
@@ -188,26 +254,8 @@ function drawEntity(g, e, t, selected, hovered) {
 // ---- text -------------------------------------------------------------------------
 function drawSign(ctx, S) {
   ctx.font = `bold ${6.5 * S}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-  ctx.fillStyle = '#2a2d45'; ctx.fillText('PAWGENTS OFFICE', (SIGN.x * TILE + SIGN.w * TILE / 2) * S, 8 * S);
+  ctx.fillStyle = '#2a2d45'; ctx.fillText('PAWGENTS OFFICE', (SIGN.x * TILE + SIGN.w * TILE / 2) * S, -3 * S);
   ctx.textAlign = 'left';
-}
-
-function drawZoneLabels(ctx, S, world) {
-  ctx.font = `${fpx(4, S)}px ${FONT}`; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-  const label = (text, x, y, strong = false) => {
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillText(text, x * S + 1, y * S + 1);
-    ctx.fillStyle = strong ? '#ffd166' : 'rgba(255,255,255,0.75)'; ctx.fillText(text, x * S, y * S);
-  };
-  ROOMS.forEach((r, i) => {
-    const sid = world.rooms[i];
-    const s = sid ? world.sessions.get(sid) : null;
-    const n = s ? (s.subagents || []).filter((a) => !a.ended).length : 0;
-    label(s ? `${r.name} · ${s.name}${n ? ` (+${n})` : ''}` : r.name, r.x * TILE + 2, r.y * TILE + 2, !!s);
-  });
-  label('기획 보드', PLAN_ZONE.x * TILE + 2, (PLAN_ZONE.y + PLAN_ZONE.h) * TILE - 6);
-  label('서가', LIBRARY_ZONE.x * TILE + 2, LIBRARY_ZONE.y * TILE + 2);
-  label('라운지', LOUNGE.x * TILE + 2, LOUNGE.y * TILE + 2);
-  label('로비', LOBBY.x * TILE + 2, LOBBY.y * TILE + 2);
 }
 
 function fitText(ctx, text, maxW) {
@@ -215,60 +263,6 @@ function fitText(ctx, text, maxW) {
   let lo = 0, hi = text.length;
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ctx.measureText(text.slice(0, mid) + '…').width <= maxW) lo = mid; else hi = mid - 1; }
   return text.slice(0, lo) + '…';
-}
-function toolText(d) {
-  return d.currentTool ? `${d.currentTool.name}${d.currentTool.target ? ' · ' + d.currentTool.target : ''}` : (STATE_LABEL[d.state] || d.state);
-}
-function shadowText(ctx, text, x, y, color) {
-  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillText(text, x + 1, y + 1);
-  ctx.fillStyle = color; ctx.fillText(text, x, y);
-}
-
-/** Name tag under the desk: name / current tool (or where they went) / rank · mode. */
-function drawNameplate(ctx, S, s, e) {
-  // ended sessions linger in the store for a while, but their desk is already free (maybe reassigned)
-  if (s.ended || s.desk >= DESK_COUNT) return;
-  const d = deskPos(s.desk);
-  const px = (d.caption.x * TILE + 2) * S, py = (d.caption.y * TILE + 1) * S;
-  const maxW = d.caption.w * TILE * S - 4 * S;
-  const away = !e || e.station?.kind !== 'desk';
-  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-  ctx.font = `bold ${fpx(4.8, S)}px ${FONT}`;
-  shadowText(ctx, fitText(ctx, s.name, maxW), px, py, away ? 'rgba(255,255,255,0.6)' : '#fff');
-  ctx.font = `${fpx(4.2, S)}px ${FONT}`;
-  let line2, color;
-  if (away && e?.station) { line2 = (PLACE_LABEL[e.station.kind] || (() => ''))(e.station); color = 'rgba(255,255,255,0.55)'; }
-  else { line2 = toolText(s); color = STATE_COLOR[s.state] || '#fff'; }
-  shadowText(ctx, fitText(ctx, line2, maxW), px, py + 5.6 * S, color);
-  const title = (FAMILIES[familyOf(s.model)] || FAMILIES.other).title;
-  const mode = MODE_LABEL[s.permissionMode];
-  const line3 = [title, mode].filter(Boolean).join(' · ');
-  if (line3) {
-    ctx.font = `${fpx(3.6, S)}px ${FONT}`;
-    shadowText(ctx, fitText(ctx, line3, maxW), px, py + 10.4 * S, away ? 'rgba(255,209,102,0.55)' : '#ffd166');
-  }
-}
-
-/** Caption under a character that is away from its desk, and under every assistant. */
-function drawEntityCaption(ctx, S, e) {
-  if (e.phase === 'leave' || e.phase === 'fade' || !e.station) return;
-  const d = e.data || {};
-  const isAsst = e.kind === 'assistant';
-  if (!isAsst && e.station.kind === 'desk') return;
-  ctx.textBaseline = 'top'; ctx.textAlign = 'center';
-  const cx = (e.x + 8) * S, cy = (e.y + 16) * S;
-  const maxW = 5 * TILE * S;
-  if (isAsst) {
-    ctx.font = `${fpx(3.8, S)}px ${FONT}`;
-    shadowText(ctx, fitText(ctx, toolText(d), maxW), cx, cy, STATE_COLOR[d.state] || '#fff');
-  } else {
-    ctx.font = `bold ${fpx(4.4, S)}px ${FONT}`;
-    shadowText(ctx, fitText(ctx, d.name || '', maxW), cx, cy, '#fff');
-    ctx.font = `${fpx(3.8, S)}px ${FONT}`;
-    const mode = MODE_LABEL[d.permissionMode];
-    shadowText(ctx, fitText(ctx, `${mode ? mode + ' · ' : ''}${toolText(d)}`, maxW), cx, cy + 5.2 * S, STATE_COLOR[d.state] || '#fff');
-  }
-  ctx.textAlign = 'left';
 }
 
 function wrapText(ctx, text, maxW, maxLines) {
@@ -343,48 +337,47 @@ function drawHUD(ctx, S, world, now) {
   const fs = fpx(4.6, S);
   ctx.font = `bold ${fs}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
   const text = `직원 ${emp}  ·  보조 ${asst}  ·  일하는 중 ${busy}${meetings ? `  ·  회의 ${meetings}` : ''}`;
-  const w = ctx.measureText(text).width + 6 * S;
-  ctx.fillStyle = 'rgba(20,22,40,0.85)'; roundRect(ctx, 1.5 * TILE * S, 2 * S, w + 4 * S, 10 * S, 2 * S); ctx.fill();
-  ctx.fillStyle = connected ? '#22c55e' : '#ef4444'; ctx.fillRect(1.5 * TILE * S + 2.5 * S, 5.5 * S, 3 * S, 3 * S);
-  ctx.fillStyle = '#f3f4f6'; ctx.fillText(text, 1.5 * TILE * S + 7 * S, 7 * S);
+  const toggle = world.rosterOpen ? '목록 ▴' : '목록 ▾';
+  const tw = ctx.measureText(text).width, gw = ctx.measureText(toggle).width;
+  const x0 = 1.5 * TILE * S, w = tw + gw + 16 * S;
+  ctx.fillStyle = world.hoverKey === HUD_BTN ? 'rgba(52,56,92,0.95)' : 'rgba(20,22,40,0.85)'; roundRect(ctx, x0, 2 * S, w, 10 * S, 2 * S); ctx.fill();
+  ctx.fillStyle = connected ? '#22c55e' : '#ef4444'; ctx.fillRect(x0 + 2.5 * S, 5.5 * S, 3 * S, 3 * S);
+  ctx.fillStyle = '#f3f4f6'; ctx.fillText(text, x0 + 7 * S, 7 * S);
+  ctx.fillStyle = '#ffd166'; ctx.fillText(toggle, x0 + 7 * S + tw + 5 * S, 7 * S);
+  world.hudBtn = { x: x0 / S, y: 2 - WALL_RISE, w: w / S, h: 10 }; // office px (the HUD hangs above the office origin)
   const clock = new Date(now).toTimeString().slice(0, 8);
   ctx.textAlign = 'right';
   const cw = ctx.measureText(clock).width + 6 * S;
-  const cx = (WHITEBOARD.x - 1) * TILE * S - 2 * S;
+  const cx = (W - TILE) * S - 2 * S;
   ctx.fillStyle = 'rgba(20,22,40,0.85)'; roundRect(ctx, cx - cw, 2 * S, cw, 10 * S, 2 * S); ctx.fill();
   ctx.fillStyle = '#f3f4f6'; ctx.fillText(clock, cx - 3 * S, 7 * S);
   ctx.textAlign = 'left';
 }
 
-/** Model legend (bottom wall). */
+/** Bottom wall: "+ 새 직원" by the entrance, and a small "모델 안내" button in the right corner (opens the legend dialog). */
 function drawLegend(ctx, S, world) {
-  const present = new Set(['fable', 'opus', 'sonnet', 'haiku']);
-  for (const s of world.sessions.values()) if (!s.ended) present.add(familyOf(s.model));
-  const fams = Object.keys(FAMILIES).filter((f) => present.has(f) && (f !== 'other' || [...world.sessions.values()].some((s) => !s.ended && familyOf(s.model) === 'other')));
-  const fs = fpx(4, S);
-  ctx.font = `${fs}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  const labelOf = (f) => [FAMILIES[f].label, FAMILIES[f].title, FAMILIES[f].breed].filter(Boolean).join(' ');
-  const itemW = fams.map((f) => 8 * S + 3 * S + ctx.measureText(labelOf(f)).width + 6 * S);
-  const totalW = itemW.reduce((a, b) => a + b, 0) + 4 * S;
-  const x0 = (W - TILE) * S - totalW - 2 * S, y0 = (H - TILE) * S + 2 * S, h = 12 * S;
-  ctx.fillStyle = 'rgba(20,22,40,0.85)'; roundRect(ctx, x0, y0, totalW, h, 2 * S); ctx.fill();
-  let x = x0 + 3 * S;
-  fams.forEach((f, i) => {
-    const img = sprite(paletteFor('legend', 'employee', f === 'other' ? null : `claude-${f}`), 'idle', 0);
-    ctx.save(); ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, x, y0 + (h - img.height * S) / 2, img.width * S, img.height * S);
-    ctx.restore();
-    ctx.fillStyle = '#f3f4f6'; ctx.fillText(labelOf(f), x + 8 * S + 3 * S, y0 + h / 2);
-    x += itemW[i];
-  });
-  drawNewButton(ctx, S, world, x0, y0, h);
+  ctx.font = `${fpx(4, S)}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const y0 = (H - TILE) * S + 2 * S, h = 12 * S;
+  const label = '모델 안내';
+  const icon = sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0);
+  const w = 3 * S + icon.width * S + 3 * S + ctx.measureText(label).width + 5 * S;
+  const x = (W - TILE) * S - w - 2 * S;
+  ctx.fillStyle = world.hoverKey === LEGEND_BTN ? 'rgba(52,56,92,0.95)' : 'rgba(20,22,40,0.85)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(icon, x + 3 * S, y0 + (h - icon.height * S) / 2, icon.width * S, icon.height * S);
+  ctx.restore();
+  ctx.fillStyle = '#f3f4f6'; ctx.fillText(label, x + 6 * S + icon.width * S, y0 + h / 2);
+  world.legendBtn = { x: x / S, y: y0 / S, w: w / S, h: h / S };
+  drawNewButton(ctx, S, world, y0, h);
 }
+export const LEGEND_BTN = '__legend__';
+export const HUD_BTN = '__hud__';
 
-/** "+ 새 직원" button just left of the legend. Its rect (office px) goes to world.newBtn for hit-testing. */
-function drawNewButton(ctx, S, world, legendX, y0, h) {
+/** "+ 새 직원" button on the bottom wall, just right of the lobby entrance. Its rect (office px) goes to world.newBtn for hit-testing. */
+function drawNewButton(ctx, S, world, y0, h) {
   const label = '+ 새 직원';
   const w = ctx.measureText(label).width + 8 * S;
-  const x = legendX - 3 * S - w;
+  const x = ((DOOR.x + 1) * TILE + 4) * S;
   const hover = world.hoverKey === NEW_BTN;
   ctx.fillStyle = hover ? '#ffe08a' : 'rgba(255,209,102,0.92)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
   ctx.fillStyle = '#1f2233'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y0 + h / 2); ctx.textAlign = 'left';
