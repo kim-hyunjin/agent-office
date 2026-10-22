@@ -1,4 +1,4 @@
-import { TILE } from './tilemap.js';
+import { TILE } from './layout.js';
 
 export const SPEED = 64; // logical px per second (cats run)
 

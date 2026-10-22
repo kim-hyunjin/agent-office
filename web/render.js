@@ -1,4 +1,5 @@
-import { TILE, W, H, WALL_RISE, DESK_COUNT, deskPos, ROOMS, WHITEBOARD, SIGN, DOOR, LOBBY, RECEPTION, RECEPTIONIST, drawReception, YARN, BOX, drawBox, WHEEL } from './tilemap.js';
+import { TILE, WALL_RISE } from './layout.js';
+import { drawReception, drawBox } from './tilemap.js';
 import { sprite, outline, OUTLINE_W, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
@@ -20,7 +21,7 @@ const BUBBLE_MS = 15000;
 const fpx = (k, S) => Math.max(13, k * S);
 
 export function render(ctx, S, world, now) {
-  const { bg, ents, sessions, hoverKey, selectedKey } = world;
+  const { bg, ents, hoverKey, selectedKey, geo } = world;
   // office space starts WALL_RISE below the canvas top; the band above is the raised top wall
   ctx.setTransform(S, 0, 0, S, 0, WALL_RISE * S);
   ctx.imageSmoothingEnabled = false;
@@ -29,14 +30,15 @@ export function render(ctx, S, world, now) {
   // who is at which desk right now
   const atDesk = new Map();
   for (const e of ents.values()) if (e.kind === 'employee' && e.station?.kind === 'desk' && e.phase !== 'leave') atDesk.set(e.station.desk, e.data);
-  for (let i = 0; i < DESK_COUNT; i++) {
+  geo.desks.forEach((d, i) => {
     const s = atDesk.get(i);
-    drawDeskProps(ctx, deskPos(i), s ? s.state : 'offduty', now, s ? familyOf(s.model) : 'other', s ? s.permissionMode : null);
-  }
+    drawDeskProps(ctx, d, s ? s.state : 'offduty', now, s ? familyOf(s.model) : 'other', s ? s.permissionMode : null);
+  });
   // meeting rooms: laptops in front of seated people
   for (const e of ents.values()) {
     if (e.station?.kind !== 'meeting' || e.phase !== 'seated') continue;
-    const r = ROOMS[e.station.room];
+    const r = geo.meetings[e.station.room];
+    if (!r) continue;
     const st = e.station;
     const state = e.data?.state || 'idle';
     if (st.y < r.table.y) drawMiniLaptop(ctx, st.x * TILE + 4, r.table.y * TILE + 1, state, now);
@@ -44,21 +46,21 @@ export function render(ctx, S, world, now) {
     else if (st.x < r.table.x) drawMiniLaptop(ctx, r.table.x * TILE + 1, st.y * TILE + 2, state, now);
     else if (st.x >= r.table.x + r.table.w) drawMiniLaptop(ctx, (r.table.x + r.table.w) * TILE - 10, st.y * TILE + 2, state, now);
   }
-  // whiteboard scribbles while someone is planning
-  const planners = [...ents.values()].filter((e) => e.station?.kind === 'plan' && e.phase === 'seated');
-  drawWhiteboard(ctx, planners.length, now);
-  drawReceptionist(ctx, ents, now);
-  drawYarn(ctx, ents, now);
-  drawWheel(ctx, ents, now);
+  // whiteboard scribbles while someone is planning in front of it
+  const seatedAt = (act, id) => [...ents.values()].some((e) => e.phase === 'seated' && e.station?.of === id && (!act || e.station.act === act));
+  for (const b of geo.whiteboards) if (seatedAt(null, b.item)) drawWhiteboard(ctx, b, now);
+  for (const r of geo.receptions) drawReceptionist(ctx, geo, r, ents, now);
+  for (const y of geo.yarns) drawYarn(ctx, y, seatedAt('bat', y.id), now);
+  for (const w of geo.wheels) drawWheel(ctx, w, seatedAt('wheel', w.id), now);
 
   const list = [...ents.values()].sort((a, b) => a.y - b.y);
-  for (const e of list) drawEntity(ctx, e, now, e.key === selectedKey, e.key === hoverKey);
+  for (const e of list) drawEntity(ctx, geo, e, now, e.key === selectedKey, e.key === hoverKey);
 
   // screen-space text
   ctx.setTransform(1, 0, 0, 1, 0, WALL_RISE * S);
-  drawSign(ctx, S);
+  drawSign(ctx, S, geo);
   const placed = [];
-  for (const e of list) drawBubble(ctx, S, e, now, placed);
+  for (const e of list) drawBubble(ctx, S, e, now, placed, geo.W);
   drawLegend(ctx, S, world, now);
   ctx.setTransform(1, 0, 0, 1, 0, 0); // HUD hangs on the raised wall
   drawHUD(ctx, S, world, now);
@@ -135,10 +137,9 @@ function drawMiniLaptop(g, x, y, state, t) {
   if ((state === 'coding' || state === 'terminal' || state === 'working') && Math.floor(t / 350) % 2) { g.fillStyle = state === 'terminal' ? '#5dff7a' : '#bcd4ff'; g.fillRect(x + 2, y + 2, 3, 1); }
 }
 
-function drawWhiteboard(g, planners, t) {
-  if (!planners) return;
-  const bx = WHITEBOARD.x * TILE + 2, by = WHITEBOARD.y * TILE - 6;
-  const k = (WHITEBOARD.w * TILE - 4) / 76; // strokes are laid out for a 76px-wide board
+function drawWhiteboard(g, board, t) {
+  const bx = board.x * TILE + 2, by = board.y * TILE - 6;
+  const k = (board.w * TILE - 4) / 76; // strokes are laid out for a 76px-wide board
   const phase = (t % 9000) / 9000;
   const strokes = [
     ['#2563eb', 0, 1, 18, 1], ['#2563eb', 0, 3, 12, 1], ['#dc2626', 22, 1, 10, 1], ['#dc2626', 22, 3, 14, 1],
@@ -150,8 +151,10 @@ function drawWhiteboard(g, planners, t) {
 }
 
 /** Resident cat behind the lobby counter; waves while someone is walking in. The counter is redrawn over its lower body. */
-function drawReceptionist(g, ents, t) {
-  const greeting = [...ents.values()].some((e) => e.phase === 'enter' && e.y >= LOBBY.y * TILE);
+function drawReceptionist(g, geo, rc, ents, t) {
+  const lobbyY = (geo.lobby ? geo.lobby.y : rc.cat.y) * TILE;
+  const greeting = [...ents.values()].some((e) => e.phase === 'enter' && e.y >= lobbyY);
+  const RECEPTIONIST = rc.cat, RECEPTION = rc.counter;
   const img = sprite(RECEPTIONIST_PAL, greeting ? 'wait' : 'idle', Math.floor(t / (greeting ? 400 : 450)));
   const x = RECEPTIONIST.x * TILE + Math.round((TILE - img.width) / 2);
   const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // bottom 4 rows tuck behind the counter
@@ -162,8 +165,7 @@ function drawReceptionist(g, ents, t) {
 }
 
 /** Yarn ball in the play area; it rolls back and forth while someone bats at it. */
-function drawYarn(g, ents, t) {
-  const batting = [...ents.values()].some((e) => e.phase === 'seated' && e.station?.act === 'bat');
+function drawYarn(g, YARN, batting, t) {
   const x = YARN.x * TILE + 2 + (batting ? Math.round(Math.abs(Math.sin(t / 260)) * 6) : 0), y = YARN.y * TILE + 10;
   g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(x, y + 4, 5, 1);
   g.fillStyle = '#e05a7a'; g.fillRect(x, y + 1, 5, 3); g.fillRect(x + 1, y, 3, 5);
@@ -172,8 +174,7 @@ function drawYarn(g, ents, t) {
 }
 
 /** Pixel ring + spokes; the spokes turn while a cat runs inside. The runner is drawn over it, on the rim's bottom. */
-function drawWheel(g, ents, t) {
-  const running = [...ents.values()].some((e) => e.phase === 'seated' && e.station?.act === 'wheel');
+function drawWheel(g, WHEEL, running, t) {
   const cx = (WHEEL.x + 1) * TILE, cy = WHEEL.y * TILE + 1, r = 13;
   const px = (x, y, w = 1, h = 1) => g.fillRect(Math.round(x), Math.round(y), w, h);
   g.fillStyle = 'rgba(0,0,0,0.15)'; px(cx - 11, WHEEL.y * TILE + 14, 22, 2);
@@ -199,7 +200,7 @@ const PLAY_ANIM = { perch: 'idle', scratch: 'scratch', bat: 'bat', box: 'idle', 
 const SEAT_Y = { desk: 10, perch: -11, box: 12, wheel: 13 };
 
 // ---- entities ------------------------------------------------------------------
-function drawEntity(g, e, t, selected, hovered) {
+function drawEntity(g, geo, e, t, selected, hovered) {
   const data = e.data || {};
   const state = e.phase === 'leave' ? 'offduty' : (data.state || 'idle');
   const moving = e.path && e.path.length > 0;
@@ -231,7 +232,7 @@ function drawEntity(g, e, t, selected, hovered) {
     if (ring) g.drawImage(ring, e.x + ox - OUTLINE_W, e.y + oy + bob - OUTLINE_W);
     g.drawImage(img, e.x + ox, e.y + oy + bob);
   }
-  if (act === 'box') drawBox(g, BOX.x * TILE, BOX.y * TILE, true); // box front over the cat's lower body
+  if (act === 'box') { const b = geo.boxes.find((x) => x.id === e.station.of); if (b) drawBox(g, b.x * TILE, b.y * TILE, true); } // box front over the cat's lower body
   if (stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
   // indicators above the head
   const gx = e.x + ox + Math.floor(img.width / 2) - 3, gy = e.y + oy - 4;
@@ -252,9 +253,10 @@ function drawEntity(g, e, t, selected, hovered) {
 }
 
 // ---- text -------------------------------------------------------------------------
-function drawSign(ctx, S) {
+function drawSign(ctx, S, geo) {
   ctx.font = `bold ${6.5 * S}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-  ctx.fillStyle = '#2a2d45'; ctx.fillText('PAWGENTS OFFICE', (SIGN.x * TILE + SIGN.w * TILE / 2) * S, -3 * S);
+  ctx.fillStyle = '#2a2d45';
+  for (const s of geo.signs) ctx.fillText('PAWGENTS OFFICE', (s.x * TILE + 5 * TILE / 2) * S, -3 * S);
   ctx.textAlign = 'left';
 }
 
@@ -283,7 +285,7 @@ function wrapText(ctx, text, maxW, maxLines) {
   return lines;
 }
 
-function drawBubble(ctx, S, e, now, placed) {
+function drawBubble(ctx, S, e, now, placed, W) {
   const data = e.data;
   if (!data || !data.lastText || now - data.lastTextAt > BUBBLE_MS || e.phase === 'leave') return;
   const age = now - data.lastTextAt;
@@ -348,7 +350,7 @@ function drawHUD(ctx, S, world, now) {
   const clock = new Date(now).toTimeString().slice(0, 8);
   ctx.textAlign = 'right';
   const cw = ctx.measureText(clock).width + 6 * S;
-  const cx = (W - TILE) * S - 2 * S;
+  const cx = (world.geo.W - TILE) * S - 2 * S;
   ctx.fillStyle = 'rgba(20,22,40,0.85)'; roundRect(ctx, cx - cw, 2 * S, cw, 10 * S, 2 * S); ctx.fill();
   ctx.fillStyle = '#f3f4f6'; ctx.fillText(clock, cx - 3 * S, 7 * S);
   ctx.textAlign = 'left';
@@ -357,6 +359,7 @@ function drawHUD(ctx, S, world, now) {
 /** Bottom wall: "+ 새 직원" by the entrance, and a small "모델 안내" button in the right corner (opens the legend dialog). */
 function drawLegend(ctx, S, world) {
   ctx.font = `${fpx(4, S)}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const { W, H } = world.geo;
   const y0 = (H - TILE) * S + 2 * S, h = 12 * S;
   const label = '모델 안내';
   const icon = sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0);
@@ -377,7 +380,7 @@ export const HUD_BTN = '__hud__';
 function drawNewButton(ctx, S, world, y0, h) {
   const label = '+ 새 직원';
   const w = ctx.measureText(label).width + 8 * S;
-  const x = ((DOOR.x + 1) * TILE + 4) * S;
+  const x = ((world.geo.door.x + 1) * TILE + 4) * S;
   const hover = world.hoverKey === NEW_BTN;
   ctx.fillStyle = hover ? '#ffe08a' : 'rgba(255,209,102,0.92)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
   ctx.fillStyle = '#1f2233'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y0 + h / 2); ctx.textAlign = 'left';

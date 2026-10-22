@@ -1,7 +1,5 @@
-import {
-  TILE, W, VIEW_H, WALL_RISE, SPAWN, DESK_COUNT, deskPos, nearDeskSpots, ROOMS, PLAN_SPOTS, LIBRARY_SPOTS, LOUNGE_SPOTS, PLAY_SPOTS, BULLPEN_SPOTS,
-  findPath, buildBackground,
-} from './tilemap.js';
+import { TILE, WALL_RISE, compile, DEFAULT_OFFICE } from './layout.js';
+import { buildBackground } from './tilemap.js';
 import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices } from './sprites.js';
 import { step, clamp } from './anim.js';
 import { render, STATE_LABEL, NEW_BTN, LEGEND_BTN, HUD_BTN } from './render.js';
@@ -45,26 +43,50 @@ class Slots {
   has(key) { return this.of.has(key); }
 }
 
-// Idle cats roam: the play area plus the lounge (sofa, coffee machine).
-const FUN_SPOTS = [...PLAY_SPOTS, ...LOUNGE_SPOTS.map((p) => ({ ...p, act: 'lounge' }))];
 const dwellMs = (act) => (act === 'nap' || act === 'lounge' ? 20000 + Math.random() * 20000 : 7000 + Math.random() * 8000);
 
 const world = {
-  bg: buildBackground(),
+  geo: null,           // compiled layout (layout.js) of the office on screen
+  bg: null,
   sessions: new Map(), // id -> server session object
   ents: new Map(),     // key -> entity
   hoverKey: null,
   selectedKey: null,
   connected: false,
-  rooms: ROOMS.map(() => null),            // room index -> session id
-  roomSeats: ROOMS.map((r) => new Slots(r.seats)),
-  plan: new Slots(PLAN_SPOTS),
-  library: new Slots(LIBRARY_SPOTS),
-  play: new Slots(FUN_SPOTS),             // idle cats roam between these
-  bullpen: new Slots(BULLPEN_SPOTS),
-  near: new Map(),                         // desk -> Slots
+  // slot allocators over the layout's spots; rebuilt by applyLayout
+  rooms: [],           // meeting room index -> session id
+  roomSeats: [],
+  plan: null, library: null, bullpen: null,
+  funSpots: [],        // idle cats roam between these: the play area plus the lounge (sofa, coffee machine)
+  play: null,
+  near: new Map(),     // aisle -> Slots
 };
 let S = 3;
+
+/** Switch to a layout: rebuild the background and every slot, then send each cat to its (new) station. */
+function applyLayout(office) {
+  const geo = compile(office);
+  world.geo = geo;
+  world.bg = buildBackground(geo);
+  world.rooms = geo.meetings.map(() => null);
+  world.roomSeats = geo.meetings.map((r) => new Slots(r.seats));
+  world.plan = new Slots(geo.planSpots);
+  world.library = new Slots(geo.librarySpots);
+  world.funSpots = [...geo.playSpots, ...geo.loungeSpots.map((p) => ({ ...p, act: 'lounge' }))];
+  world.play = new Slots(world.funSpots);
+  world.bullpen = new Slots(geo.bullpenSpots);
+  world.near = new Map();
+  const now = Date.now();
+  for (const e of world.ents.values()) {
+    e.station = null;
+    if (e.phase === 'fade') continue;
+    const s = world.sessions.get(e.sessionId);
+    if (!s) goTo(e, { kind: 'exit', ...geo.spawn });
+    else if (e.kind === 'employee') goTo(e, sessionStation(s, e, now));
+    else if (e.data && !e.data.ended) goTo(e, assistantStation(s, e.data));
+  }
+  if (S) resize();
+}
 
 const PANEL_W = 380; // keep in sync with #panel width in style.css
 const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit transitions
@@ -76,7 +98,7 @@ function fitScale() {
   const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight);
   // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
-  return clamp(Math.floor(Math.min(availW / W, availH / VIEW_H) * 20) / 20, 1, 8);
+  return clamp(Math.floor(Math.min(availW / world.geo.W, availH / world.geo.VIEW_H) * 20) / 20, 1, 8);
 }
 
 function placeTicker() {
@@ -88,7 +110,7 @@ function resize() {
   clearTimeout(refitTimer);
   canvas.classList.remove('refit');
   S = fitScale();
-  canvas.width = Math.round(W * S); canvas.height = Math.round(VIEW_H * S);
+  canvas.width = Math.round(world.geo.W * S); canvas.height = Math.round(world.geo.VIEW_H * S);
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
   placeTicker();
 }
@@ -103,12 +125,12 @@ function refit() {
   const s = fitScale();
   if (s === S && !canvas.classList.contains('refit')) return;
   canvas.classList.add('refit');
-  canvas.style.width = `${Math.round(W * s)}px`; canvas.style.height = `${Math.round(VIEW_H * s)}px`;
+  canvas.style.width = `${Math.round(world.geo.W * s)}px`; canvas.style.height = `${Math.round(world.geo.VIEW_H * s)}px`;
   clearTimeout(refitTimer);
   refitTimer = setTimeout(resize, PANEL_ANIM_MS + 20);
 }
 window.addEventListener('resize', resize);
-resize();
+applyLayout(DEFAULT_OFFICE);
 
 /** Pointer position in office (unscaled) pixels; CSS size can differ from the backing store mid-refit. */
 function officeXY(ev) {
@@ -118,8 +140,10 @@ function officeXY(ev) {
 
 // ---- stations ------------------------------------------------------------------
 // Two desks of a pod share one aisle column, so near-desk slots are keyed by the aisle, not the desk.
+const NO_SLOTS = new Slots([]);
 const nearSlots = (desk) => {
-  const spots = nearDeskSpots(desk);
+  if (!world.geo.desks[desk]) return NO_SLOTS; // no desk (overflow): assistants stand in the lobby
+  const spots = world.geo.nearDeskSpots(desk);
   const key = `${spots[0].x}:${spots[0].y}`;
   let s = world.near.get(key);
   if (!s) { s = new Slots(spots); world.near.set(key, s); }
@@ -129,43 +153,45 @@ const sameStation = (a, b) => a && b && a.kind === b.kind && a.x === b.x && a.y 
 
 function releaseRoom(sid) {
   const r = world.rooms.indexOf(sid);
-  if (r >= 0) { world.rooms[r] = null; world.roomSeats[r] = new Slots(ROOMS[r].seats); }
+  if (r >= 0) { world.rooms[r] = null; world.roomSeats[r] = new Slots(world.geo.meetings[r].seats); }
 }
 
 /** Where should this session's employee be right now? */
 function sessionStation(s, e, now) {
-  if (s.ended) { world.plan.release(s.id); world.library.release(s.id); world.play.release(s.id); releaseRoom(s.id); return { kind: 'exit', ...SPAWN }; }
+  const geo = world.geo;
+  if (s.ended) { world.plan.release(s.id); world.library.release(s.id); world.play.release(s.id); releaseRoom(s.id); return { kind: 'exit', ...geo.spawn }; }
   const live = (s.subagents || []).filter((a) => !a.ended);
   if (live.length) e.lastLiveSub = now;
   const wantsRoom = live.length > 0 || (e.lastLiveSub && now - e.lastLiveSub < MEETING_LINGER_MS);
   if (wantsRoom) {
     let r = world.rooms.indexOf(s.id);
     if (r < 0) { r = world.rooms.indexOf(null); if (r >= 0) world.rooms[r] = s.id; }
-    if (r >= 0) { world.plan.release(s.id); world.library.release(s.id); world.play.release(s.id); return { kind: 'meeting', room: r, ...ROOMS[r].head }; }
+    if (r >= 0) { world.plan.release(s.id); world.library.release(s.id); world.play.release(s.id); return { kind: 'meeting', room: r, ...geo.meetings[r].head }; }
   } else releaseRoom(s.id);
   const busyWithSubs = live.length > 0; // rooms full: stay at the desk with the assistants around
   if (s.permissionMode === 'plan') {
     const i = world.plan.take(s.id);
-    if (i >= 0) { world.library.release(s.id); world.play.release(s.id); return { kind: 'plan', ...PLAN_SPOTS[i] }; }
+    if (i >= 0) { world.library.release(s.id); world.play.release(s.id); return { kind: 'plan', ...geo.planSpots[i] }; }
   } else world.plan.release(s.id);
   if (s.state === 'searching') e.lastSearch = now;
   if (e.lastSearch && now - e.lastSearch < LIBRARY_LINGER_MS && s.state !== 'idle') {
     const i = world.library.take(s.id);
-    if (i >= 0) { world.play.release(s.id); return { kind: 'library', ...LIBRARY_SPOTS[i] }; }
+    if (i >= 0) { world.play.release(s.id); return { kind: 'library', ...geo.librarySpots[i] }; }
   } else world.library.release(s.id);
   const idleFor = s.state === 'idle' ? now - s.stateSince : 0;
   // Turn ended but a background shell/monitor will wake it — waiting at the desk, not on a break.
   if (!busyWithSubs && !awaitingBg(s) && idleFor > PLAY_AFTER_MS) {
     if (!world.play.has(s.id) || now >= e.playUntil) { // time to wander to another spot
       const i = world.play.takeRandom(s.id);
-      if (i >= 0) e.playUntil = now + dwellMs(FUN_SPOTS[i].act);
+      if (i >= 0) e.playUntil = now + dwellMs(world.funSpots[i].act);
     }
     const i = world.play.of.get(s.id);
-    if (i !== undefined) { const p = FUN_SPOTS[i]; return { kind: p.act === 'lounge' ? 'lounge' : 'play', ...p }; }
+    if (i !== undefined) { const p = world.funSpots[i]; return { kind: p.act === 'lounge' ? 'lounge' : 'play', ...p }; }
   } else world.play.release(s.id);
-  if (s.desk < DESK_COUNT) { world.bullpen.release(`s:${s.id}`); const d = deskPos(s.desk); return { kind: 'desk', desk: s.desk, ...d.chair }; }
+  const d = geo.desks[s.desk];
+  if (d) { world.bullpen.release(`s:${s.id}`); return { kind: 'desk', desk: s.desk, ...d.chair }; }
   const i = world.bullpen.take(`s:${s.id}`);
-  return { kind: 'bullpen', ...BULLPEN_SPOTS[Math.max(0, i)] };
+  return { kind: 'bullpen', ...geo.bullpenSpots[Math.max(0, i)] };
 }
 
 /** Where should this subagent's assistant be? null = stay and fade. */
@@ -175,15 +201,15 @@ function assistantStation(s, a) {
   if (r >= 0) {
     nearSlots(s.desk).release(key); world.bullpen.release(`a:${key}`);
     const i = world.roomSeats[r].take(key);
-    const room = ROOMS[r];
+    const room = world.geo.meetings[r];
     if (i >= 0) return { kind: 'meeting', room: r, ...room.seats[i] };
     return { kind: 'meeting', room: r, x: room.x + room.w - 1, y: room.y + (hashStr(key) % room.h) };
   }
   for (const rs of world.roomSeats) rs.release(key);
   const i = nearSlots(s.desk).take(key);
-  if (i >= 0) { world.bullpen.release(`a:${key}`); return { kind: 'near', ...nearDeskSpots(s.desk)[i] }; }
+  if (i >= 0) { world.bullpen.release(`a:${key}`); return { kind: 'near', ...world.geo.nearDeskSpots(s.desk)[i] }; }
   const b = world.bullpen.take(`a:${key}`);
-  return { kind: 'bullpen', ...BULLPEN_SPOTS[Math.max(0, b)] };
+  return { kind: 'bullpen', ...world.geo.bullpenSpots[Math.max(0, b)] };
 }
 
 function releaseAll(e) {
@@ -197,7 +223,7 @@ function goTo(e, station, teleport = false) {
   e.station = station;
   if (teleport) { e.x = station.x * TILE; e.y = station.y * TILE; e.path = []; e.phase = 'seated'; return; }
   const cur = { x: Math.round(e.x / TILE), y: Math.round(e.y / TILE) };
-  e.path = findPath(cur, station) || [station];
+  e.path = world.geo.findPath(cur, station) || [station];
   e.phase = station.kind === 'exit' ? 'leave' : 'enter';
   e.onArrive = () => { if (e.station.kind === 'exit') { releaseAll(e); world.ents.delete(e.key); } else e.phase = 'seated'; };
 }
@@ -207,7 +233,7 @@ function spawnEmployee(s, seated, now) {
   const e = {
     key: s.id, kind: 'employee', sessionId: s.id, desk: s.desk, data: s,
     pal: paletteFor(s.id, 'employee', s.model), seed: hashStr(s.id) % 1000,
-    x: SPAWN.x * TILE, y: SPAWN.y * TILE, path: [], phase: 'enter', alpha: 1, station: null, lastLiveSub: 0, lastSearch: 0,
+    x: world.geo.spawn.x * TILE, y: world.geo.spawn.y * TILE, path: [], phase: 'enter', alpha: 1, station: null, lastLiveSub: 0, lastSearch: 0,
   };
   world.ents.set(e.key, e);
   goTo(e, sessionStation(s, e, now), seated);
@@ -217,7 +243,7 @@ function spawnAssistant(s, a, parent, seated) {
   const e = {
     key: `${s.id}/${a.agentId}`, kind: 'assistant', sessionId: s.id, agentId: a.agentId, desk: s.desk, data: a,
     pal: paletteFor(a.agentId, 'assistant', a.model || s.model), seed: hashStr(a.agentId) % 1000,
-    x: parent ? parent.x : SPAWN.x * TILE, y: parent ? parent.y : SPAWN.y * TILE, path: [], phase: 'enter', alpha: 1, station: null,
+    x: parent ? parent.x : world.geo.spawn.x * TILE, y: parent ? parent.y : world.geo.spawn.y * TILE, path: [], phase: 'enter', alpha: 1, station: null,
   };
   world.ents.set(e.key, e);
   goTo(e, assistantStation(s, a), seated);
@@ -303,7 +329,7 @@ function removeSession(id) {
   const s = world.sessions.get(id);
   world.sessions.delete(id);
   const e = world.ents.get(id);
-  if (e) goTo(e, { kind: 'exit', ...SPAWN });
+  if (e) goTo(e, { kind: 'exit', ...world.geo.spawn });
   for (const ae of world.ents.values()) if (ae.kind === 'assistant' && ae.sessionId === id) fade(ae, Date.now());
   panel.remove(id);
   roster.update(world);
@@ -382,7 +408,7 @@ const PLACE = { desk: '자리', meeting: '회의실', plan: '기획 보드', lib
 function placeOf(e) {
   if (!e.station) return '';
   const k = e.station.kind;
-  if (k === 'meeting') return ROOMS[e.station.room].name;
+  if (k === 'meeting') return world.geo.meetings[e.station.room]?.name || PLACE.meeting;
   return PLACE[k] || '';
 }
 // ---- roster (opened from the HUD) ----------------------------------------------------

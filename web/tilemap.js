@@ -1,161 +1,7 @@
-// Office layout: 32×20 tiles of 16px, split into rooms by partitions. Meeting rooms A/B (left) and C/D (right)
-// flank the open office (bench desks); along the bottom: lobby, lounge, planning room, library. The lobby opens
-// straight up into the office at x = 8. Also exposes walkability + BFS path finding.
-export const TILE = 16;
-export const MAP_W = 32;
-export const MAP_H = 20;
-export const W = MAP_W * TILE;
-export const H = MAP_H * TILE;
-/** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
-export const WALL_RISE = TILE;
-export const VIEW_H = H + WALL_RISE;
+// Draws an office from its compiled layout (layout.js): floors, walls, built-in furniture. Live props (monitors,
+// the receptionist, yarn, wheel) are drawn every frame by render.js; the drawing helpers it needs are exported.
+import { TILE, WALL_RISE } from './layout.js';
 
-export const DESK_COUNT = 12;
-export const DOOR = { x: 3, y: 19 };
-export const SPAWN = { x: 3, y: 18 };
-
-// ---- zones ----------------------------------------------------------------------
-/** Meeting room with a 4×2 table at (tx, ty): four seats above, four below, two on the right, head + one on the left. */
-function room(id, name, x, y, w, h, door, tx, ty) {
-  const seats = [];
-  for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty - 1 });
-  for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty + 2, back: true }); // facing the table, back to the viewer
-  seats.push({ x: tx + 4, y: ty }, { x: tx + 4, y: ty + 1 }, { x: tx - 1, y: ty + 1 });
-  return { id, name, x, y, w, h, door, table: { x: tx, y: ty, w: 4, h: 2 }, head: { x: tx - 1, y: ty }, seats };
-}
-export const ROOMS = [
-  room(0, '회의실 A', 1, 1, 6, 5, { x: 7, y: 1 }, 2, 3),
-  room(1, '회의실 B', 1, 7, 6, 5, { x: 7, y: 7 }, 2, 9),
-  room(2, '회의실 C', 25, 1, 6, 5, { x: 24, y: 1 }, 26, 3),
-  room(3, '회의실 D', 25, 7, 6, 5, { x: 24, y: 7 }, 26, 9),
-];
-export const LOBBY = { x: 1, y: 13, w: 8, h: 6 };
-export const RECEPTION = { x: 2, y: 14, w: 3 };
-export const RECEPTIONIST = { x: 3, y: 13 }; // resident cat behind the counter
-export const BULLPEN_SPOTS = [];
-for (let y = 16; y <= 17; y++) for (let x = 1; x <= 8; x++) BULLPEN_SPOTS.push({ x, y });
-
-export const LOUNGE = { x: 10, y: 13, w: 6, h: 6 };
-export const COFFEE = { x: 15, y: 13 };
-export const SOFA = { x: 11, y: 15, w: 3 };
-export const RUG = { x: 10, y: 14, w: 5, h: 5 };
-export const LOUNGE_SPOTS = [{ x: 11, y: 15, sofa: true }, { x: 12, y: 15, sofa: true }, { x: 13, y: 15, sofa: true }, { x: 14, y: 13 }, { x: 14, y: 14 }];
-
-// play area along the bottom of the office (row 11 stays clear: it's the way to the bottom rooms' doors)
-export const PLAY_ZONE = { x: 9, y: 8, w: 14, h: 3 };
-export const CAT_TREE = { x: 10, y: 9 };
-export const SCRATCH_POST = { x: 13, y: 9 };
-export const YARN = { x: 16, y: 10 };
-export const BOX = { x: 19, y: 9 };
-export const WHEEL = { x: 16, y: 9, w: 2 }; // cat wheel; drawn (and spun) by the renderer
-export const CUSHION = { x: 21, y: 10 };
-/** Where idle cats hang out, and what they do there. */
-export const PLAY_SPOTS = [
-  { ...CAT_TREE, act: 'perch' },        // on top of the cat tree
-  { x: 12, y: 9, act: 'scratch' },      // up on its hind legs, clawing the post's left side
-  { x: 15, y: 10, act: 'bat' },         // batting the yarn ball
-  { ...BOX, act: 'box' },               // sitting in the box
-  { x: WHEEL.x, y: WHEEL.y, act: 'wheel' }, // running in the wheel
-  { ...CUSHION, act: 'nap' },           // curled up on the cushion
-  { x: 11, y: 8, act: 'look' }, { x: 14, y: 8, act: 'look' }, { x: 22, y: 8, act: 'look' },
-];
-export const PLAN_ZONE = { x: 17, y: 13, w: 5, h: 6 };
-export const WHITEBOARD = { x: 18, y: 14, w: 3 }; // free-standing board on legs; planners stand in front of it
-export const PLAN_SPOTS = [17, 18, 19, 20, 21].map((x) => ({ x, y: 15 }));
-export const LIBRARY_ZONE = { x: 23, y: 13, w: 8, h: 6 };
-export const BOOKSHELF = { x: 24, y: 18, w: 6 }; // along the south wall
-export const LIBRARY_SPOTS = [24, 25, 26, 27, 28].map((x) => ({ x, y: 17 })); // in front of the bookshelf
-// top wall, left to right: HUD (drawn in render.js), windows, sign, clock
-export const WINDOW = { x: 15, w: 6 }; // tiles; drawn as 2-tile panes
-export const SIGN = { x: 22, y: 0, w: 5 };
-export const PLANTS = [{ x: 1, y: 13 }, { x: 6, y: 13 }, { x: 10, y: 10 }, { x: 23, y: 10 }, { x: 15, y: 18 }, { x: 17, y: 18 }, { x: 30, y: 13 }, { x: 23, y: 18 }];
-
-/**
- * Interior partitions, one tile thick. 'h' runs east–west and shows its face (3/4 view); 'v' runs north–south
- * and only its top shows. Glass around meeting rooms, solid plaster elsewhere. Doors are gaps.
- */
-export const WALLS = [
-  { dir: 'v', x: 7, y: 1, len: 12, glass: true },  // A, B | office
-  { dir: 'h', x: 1, y: 6, len: 7, glass: true },   // A | B
-  { dir: 'h', x: 1, y: 12, len: 7, glass: true },  // B | lobby
-  { dir: 'v', x: 24, y: 1, len: 12, glass: true }, // office | C, D
-  { dir: 'h', x: 24, y: 6, len: 7, glass: true },  // C | D
-  { dir: 'h', x: 24, y: 12, len: 7, glass: true }, // D | library
-  { dir: 'h', x: 9, y: 12, len: 15 },              // office | bottom rooms (x = 8 stays open: lobby ↔ office)
-  { dir: 'v', x: 9, y: 13, len: 6 },               // lobby | lounge
-  { dir: 'v', x: 16, y: 13, len: 6 },              // lounge | planning
-  { dir: 'v', x: 22, y: 13, len: 6 },              // planning | library
-];
-export const DOORS = [...ROOMS.map((r) => r.door), { x: 12, y: 12 }, { x: 19, y: 12 }, { x: 23, y: 12 }];
-const isDoor = (x, y) => DOORS.some((d) => d.x === x && d.y === y);
-
-/**
- * Bench desks: 2 rows × 3 pods; a pod is [chair][desk][desk][chair], the two cats facing each other in profile.
- * Each desk stands lengthwise, 1 tile wide and 2 deep, with the keyboard along the chair's edge and the monitor beside
- * it. Aisles at x = 8, 13, 18, 23.
- */
-export const DESKS_PER_ROW = 6;
-export function deskPos(i) {
-  const row = Math.floor(i / DESKS_PER_ROW), col = i % DESKS_PER_ROW;
-  const px = 9 + (col >> 1) * 5, y = 2 + row * 3;
-  if ((col & 1) === 0) return { y, desk: { x: px + 1, y, w: 1, h: 2 }, chair: { x: px, y, face: 'right' } };
-  return { y, desk: { x: px + 2, y, w: 1, h: 2 }, chair: { x: px + 3, y, face: 'left' } };
-}
-/** Standing spots in the aisle beside a desk's chair, used when every meeting room is taken. */
-export function nearDeskSpots(i) {
-  const d = deskPos(i);
-  const ax = d.chair.face === 'right' ? d.chair.x - 1 : d.chair.x + 1;
-  return [{ x: ax, y: d.y }, { x: ax, y: d.y - 1 }, { x: ax, y: d.y + 1 }];
-}
-
-// ---- walkability -----------------------------------------------------------------
-const blocked = new Uint8Array(MAP_W * MAP_H);
-const block = (x, y, w = 1, h = 1) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (i >= 0 && j >= 0 && i < MAP_W && j < MAP_H) blocked[j * MAP_W + i] = 1; };
-const unblock = (x, y) => { blocked[y * MAP_W + x] = 0; };
-block(0, 0, MAP_W, 1); block(0, MAP_H - 1, MAP_W, 1); block(0, 0, 1, MAP_H); block(MAP_W - 1, 0, 1, MAP_H);
-for (const wl of WALLS) if (wl.dir === 'h') block(wl.x, wl.y, wl.len, 1); else block(wl.x, wl.y, 1, wl.len);
-for (const d of DOORS) unblock(d.x, d.y);
-for (const r of ROOMS) block(r.table.x, r.table.y, r.table.w, r.table.h);
-block(RECEPTION.x, RECEPTION.y, RECEPTION.w, 1);
-block(RECEPTIONIST.x, RECEPTIONIST.y);
-for (let i = 0; i < DESK_COUNT; i++) { const d = deskPos(i); block(d.desk.x, d.desk.y, d.desk.w, d.desk.h); }
-block(BOOKSHELF.x, BOOKSHELF.y, BOOKSHELF.w, 1);
-block(WHITEBOARD.x, WHITEBOARD.y, WHITEBOARD.w, 1);
-block(COFFEE.x, COFFEE.y);
-for (const p of [CAT_TREE, SCRATCH_POST, BOX]) block(p.x, p.y);
-block(WHEEL.x, WHEEL.y, WHEEL.w, 1);
-for (const p of PLANTS) block(p.x, p.y);
-export const isBlocked = (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || blocked[y * MAP_W + x] === 1;
-
-/** BFS shortest path on the tile grid. Returns tiles after `from` ending at `to`, [] if equal, null if unreachable. */
-export function findPath(from, to) {
-  if (from.x === to.x && from.y === to.y) return [];
-  const key = (x, y) => y * MAP_W + x;
-  const prev = new Int32Array(MAP_W * MAP_H).fill(-1);
-  const q = [key(from.x, from.y)];
-  prev[q[0]] = q[0];
-  const target = key(to.x, to.y);
-  let head = 0, found = false;
-  while (head < q.length) {
-    const k = q[head++];
-    if (k === target) { found = true; break; }
-    const x = k % MAP_W, y = (k / MAP_W) | 0;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx, ny = y + dy;
-      if (isBlocked(nx, ny) && !(nx === to.x && ny === to.y)) continue;
-      const nk = key(nx, ny);
-      if (prev[nk] !== -1) continue;
-      prev[nk] = k;
-      q.push(nk);
-    }
-  }
-  if (!found) return null;
-  const path = [];
-  for (let k = target; k !== key(from.x, from.y); k = prev[k]) path.push({ x: k % MAP_W, y: (k / MAP_W) | 0 });
-  return path.reverse();
-}
-
-// ---- static background -------------------------------------------------------------
 const C = {
   wallTop: '#2a2d45', wallEdge: '#4b5078', wallFace: '#4f5680', wallStripe: '#495079', wainscot: '#3b3f5c', trim: '#6b729c', floorShade: 'rgba(0,0,0,0.22)',
   wood: '#cdb089', wood2: '#c3a67f', woodLine: '#b4976f',
@@ -170,9 +16,15 @@ const C = {
   plant: '#2e8b57', plantDark: '#206b40', pot: '#b5651d', recept: '#6b7a99', receptTop: '#8ea0c4', receptDark: '#4f5b77',
   door: '#8b5a2b', doorDark: '#5c3a1a',
 };
+/** Floor of each room type (checkerboard pair); open office areas keep the wood planks. */
+export const FLOOR = {
+  meeting: [C.meet, C.meet2], lobby: [C.lobby, C.lobby2], plan: [C.plan, C.plan2], library: [C.lib, C.lib2],
+  lounge: [C.lounge, C.lounge2], play: [C.mat, C.mat2],
+};
 
-export function buildBackground() {
-  const c = new OffscreenCanvas(W, VIEW_H);
+export function buildBackground(geo) {
+  const { W, H, MAP_W, MAP_H, door: DOOR } = geo;
+  const c = new OffscreenCanvas(W, H + WALL_RISE);
   const g = c.getContext('2d');
   g.translate(0, WALL_RISE); // y < 0 is the raised part of the top wall
   const tile = (x, y, a, b) => { g.fillStyle = (x + y) % 2 ? a : b; g.fillRect(x * TILE, y * TILE, TILE, TILE); };
@@ -182,15 +34,10 @@ export function buildBackground() {
     g.fillStyle = C.woodLine; g.fillRect(x * TILE, y * TILE + TILE - 1, TILE, 1);
     if ((x * 7 + y * 3) % 5 === 0) g.fillRect(x * TILE + 7, y * TILE, 1, TILE - 1);
   }
-  // zones
+  // zones, then rugs on top
   const fill = (z, a, b) => { for (let y = z.y; y < z.y + z.h; y++) for (let x = z.x; x < z.x + z.w; x++) tile(x, y, a, b); };
-  for (const r of ROOMS) fill(r, C.meet, C.meet2);
-  fill(LOBBY, C.lobby, C.lobby2);
-  fill(PLAN_ZONE, C.plan, C.plan2);
-  fill(LIBRARY_ZONE, C.lib, C.lib2);
-  fill(LOUNGE, C.lounge, C.lounge2);
-  fill(RUG, C.rug, C.rug2);
-  fill(PLAY_ZONE, C.mat, C.mat2);
+  for (const r of geo.rooms) if (FLOOR[r.type]) fill(r, ...FLOOR[r.type]);
+  for (const r of geo.rugs) fill({ x: r.x, y: r.y, w: 5, h: 5 }, C.rug, C.rug2);
   // walls, Stardew-style 3/4 view: the top wall shows its face (cap, wallpaper, wainscot, baseboard) and casts
   // a shadow onto the floor; side and bottom walls face away, so only their dark caps are visible.
   const top = -WALL_RISE;
@@ -202,101 +49,98 @@ export function buildBackground() {
   g.fillStyle = C.floorShade; g.fillRect(0, TILE, W, 3); g.fillRect(0, TILE + 3, W, 2);
   g.fillStyle = C.wallTop; g.fillRect(0, top, TILE, H - top); g.fillRect(W - TILE, top, TILE, H - top); g.fillRect(0, H - TILE, W, TILE);
   g.fillStyle = C.wallEdge; g.fillRect(TILE - 1, TILE, 1, H - 2 * TILE); g.fillRect(W - TILE, TILE, 1, H - 2 * TILE); g.fillRect(TILE, H - TILE, W - 2 * TILE, 1);
-  // windows between the HUD and the sign
-  for (let x = WINDOW.x; x < WINDOW.x + WINDOW.w; x += 2) {
+  // windows (2-tile panes) and the sign board on the top wall
+  for (const wn of geo.windows) for (let x = wn.x; x < wn.x + 6; x += 2) {
     g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 1, -10, 30, 14);
     g.fillStyle = '#9ad1f5'; g.fillRect(x * TILE + 2, -9, 28, 12);
     g.fillStyle = '#c4e6fb'; g.fillRect(x * TILE + 3, -8, 4, 1); g.fillRect(x * TILE + 3, -7, 2, 1); g.fillRect(x * TILE + 19, -8, 4, 1); g.fillRect(x * TILE + 19, -7, 2, 1);
     g.fillStyle = C.glassFrame; g.fillRect(x * TILE + 16, -9, 1, 12); g.fillRect(x * TILE + 2, -3, 28, 1);
     g.fillStyle = C.trim; g.fillRect(x * TILE, 4, 32, 1);
   }
-  // sign board
-  g.fillStyle = C.boardFrame; g.fillRect(SIGN.x * TILE, -9, SIGN.w * TILE, 12);
-  g.fillStyle = C.board; g.fillRect(SIGN.x * TILE + 1, -8, SIGN.w * TILE - 2, 10);
-  // partitions: north–south runs first, so east–west faces cover the junctions
-  for (const wl of WALLS) if (wl.dir === 'v') drawWallV(g, wl);
-  for (const wl of WALLS) if (wl.dir === 'h') drawWallH(g, wl);
-  // meeting rooms: table + chairs
-  for (const r of ROOMS) {
+  for (const s of geo.signs) {
+    g.fillStyle = C.boardFrame; g.fillRect(s.x * TILE, -9, 5 * TILE, 12);
+    g.fillStyle = C.board; g.fillRect(s.x * TILE + 1, -8, 5 * TILE - 2, 10);
+  }
+  // partitions: north–south tiles first, so east–west faces cover the junctions
+  for (const t of geo.wallTiles) if (t.v) drawWallV(g, t, geo.doorAt(t.x, t.y));
+  for (const t of geo.wallTiles) if (t.h) drawWallH(g, t, geo.doorAt(t.x, t.y));
+  // meeting tables + chairs
+  for (const r of geo.meetings) {
     drawMeetingTable(g, r.table.x * TILE, r.table.y * TILE, r.table.w * TILE, r.table.h * TILE);
     for (const s of r.seats) drawChair(g, s.x * TILE, s.y * TILE, s.y < r.table.y ? 'down' : s.y >= r.table.y + r.table.h ? 'up' : 'side');
     drawChair(g, r.head.x * TILE, r.head.y * TILE, 'side', true);
   }
-  // lobby: reception + door
-  drawReception(g, RECEPTION.x * TILE, RECEPTION.y * TILE, RECEPTION.w * TILE);
+  for (const r of geo.receptions) drawReception(g, r.counter.x * TILE, r.counter.y * TILE, r.counter.w * TILE);
   // front entrance: an opening in the bottom wall's cap, door frame posts on either side, doormat on the sill
   g.fillStyle = C.lobby; g.fillRect(DOOR.x * TILE, H - TILE, TILE, TILE);
   g.fillStyle = C.doorDark; g.fillRect(DOOR.x * TILE - 2, H - TILE, 2, TILE); g.fillRect(DOOR.x * TILE + TILE, H - TILE, 2, TILE);
   g.fillStyle = C.door; g.fillRect(DOOR.x * TILE + 1, H - TILE + 3, TILE - 2, 10);
   g.fillStyle = C.doorDark; for (let i = 0; i < 4; i++) g.fillRect(DOOR.x * TILE + 3, H - TILE + 5 + i * 2, TILE - 6, 1);
-  // desks
-  for (let i = 0; i < DESK_COUNT; i++) {
-    const d = deskPos(i);
+  for (const d of geo.desks) {
     drawDeskChair(g, d.chair.x * TILE, d.chair.y * TILE, d.chair.face === 'right');
-    drawDesk(g, d.desk.x * TILE, d.desk.y * TILE, d.desk.w * TILE, d.desk.h * TILE, (i & 1) === 1);
+    drawDesk(g, d.desk.x * TILE, d.desk.y * TILE, d.desk.w * TILE, d.desk.h * TILE, !!d.right);
   }
   // play area
-  drawCatTree(g, CAT_TREE.x * TILE, CAT_TREE.y * TILE);
-  drawScratchPost(g, SCRATCH_POST.x * TILE, SCRATCH_POST.y * TILE);
-  drawBox(g, BOX.x * TILE, BOX.y * TILE);
-  drawCushion(g, CUSHION.x * TILE, CUSHION.y * TILE);
-  // planning room
-  drawStandingBoard(g, WHITEBOARD.x * TILE, WHITEBOARD.y * TILE, WHITEBOARD.w * TILE);
-  // library
-  drawBookshelf(g, BOOKSHELF.x * TILE, BOOKSHELF.y * TILE, BOOKSHELF.w * TILE);
-  // lounge
-  drawSofa(g, SOFA.x * TILE, SOFA.y * TILE, SOFA.w * TILE);
-  g.fillStyle = C.table; g.fillRect((SOFA.x + 1) * TILE - 12, 17 * TILE + 2, 24, 10); g.fillStyle = C.tableEdge; g.fillRect((SOFA.x + 1) * TILE - 12, 17 * TILE + 11, 24, 2);
-  g.fillStyle = C.coffee; g.fillRect(COFFEE.x * TILE + 2, COFFEE.y * TILE + 1, 12, 14);
-  g.fillStyle = C.coffee2; g.fillRect(COFFEE.x * TILE + 4, COFFEE.y * TILE + 3, 8, 4);
-  g.fillStyle = '#fff'; g.fillRect(COFFEE.x * TILE + 6, COFFEE.y * TILE + 10, 4, 3);
-  for (const p of PLANTS) drawPlant(g, p.x * TILE, p.y * TILE);
+  for (const p of geo.catTrees) drawCatTree(g, p.x * TILE, p.y * TILE);
+  for (const p of geo.scratchPosts) drawScratchPost(g, p.x * TILE, p.y * TILE);
+  for (const p of geo.boxes) drawBox(g, p.x * TILE, p.y * TILE);
+  for (const p of geo.cushions) drawCushion(g, p.x * TILE, p.y * TILE);
+  for (const b of geo.whiteboards) drawStandingBoard(g, b.x * TILE, b.y * TILE, b.w * TILE);
+  for (const b of geo.bookshelves) drawBookshelf(g, b.x * TILE, b.y * TILE, b.w * TILE);
+  // lounge: sofa with a coffee table in front, coffee machine
+  for (const s of geo.sofas) {
+    drawSofa(g, s.x * TILE, s.y * TILE, s.w * TILE);
+    g.fillStyle = C.table; g.fillRect((s.x + 1) * TILE - 12, (s.y + 2) * TILE + 2, 24, 10); g.fillStyle = C.tableEdge; g.fillRect((s.x + 1) * TILE - 12, (s.y + 2) * TILE + 11, 24, 2);
+  }
+  for (const k of geo.coffees) {
+    g.fillStyle = C.coffee; g.fillRect(k.x * TILE + 2, k.y * TILE + 1, 12, 14);
+    g.fillStyle = C.coffee2; g.fillRect(k.x * TILE + 4, k.y * TILE + 3, 8, 4);
+    g.fillStyle = '#fff'; g.fillRect(k.x * TILE + 6, k.y * TILE + 10, 4, 3);
+  }
+  for (const p of geo.plants) drawPlant(g, p.x * TILE, p.y * TILE);
   return c;
 }
 
-/** North–south partition: only its top shows. Glass is a rail with panes; plaster is a dark cap like the outer walls. */
-function drawWallV(g, wl) {
-  const x = wl.x * TILE;
-  for (let y = wl.y; y < wl.y + wl.len; y++) {
-    const py = y * TILE;
-    if (isDoor(wl.x, y)) { // open doorway: just the jambs
-      g.fillStyle = C.doorDark; g.fillRect(x + 4, py, 8, 2); g.fillRect(x + 4, py + TILE - 2, 8, 2);
-      continue;
-    }
-    if (wl.glass) {
-      g.fillStyle = C.glass; g.fillRect(x + 5, py, 6, TILE);
-      g.fillStyle = C.glassFrame; g.fillRect(x + 5, py, 1, TILE); g.fillRect(x + 10, py, 1, TILE);
-      g.fillStyle = C.glassDark; g.fillRect(x + 5, py, 6, 1);
-    } else {
-      g.fillStyle = C.wallTop; g.fillRect(x + 4, py, 8, TILE);
-      g.fillStyle = C.wallEdge; g.fillRect(x + 4, py, 1, TILE); g.fillRect(x + 11, py, 1, TILE);
-    }
+/** North–south partition tile: only its top shows. Glass is a rail with panes; plaster is a dark cap like the outer walls. */
+function drawWallV(g, t, door) {
+  const x = t.x * TILE, py = t.y * TILE;
+  if (door) { // doorway: just the jambs (an open one has none)
+    if (!door.open) { g.fillStyle = C.doorDark; g.fillRect(x + 4, py, 8, 2); g.fillRect(x + 4, py + TILE - 2, 8, 2); }
+    return;
+  }
+  if (t.glass) {
+    g.fillStyle = C.glass; g.fillRect(x + 5, py, 6, TILE);
+    g.fillStyle = C.glassFrame; g.fillRect(x + 5, py, 1, TILE); g.fillRect(x + 10, py, 1, TILE);
+    g.fillStyle = C.glassDark; g.fillRect(x + 5, py, 6, 1);
+  } else {
+    g.fillStyle = C.wallTop; g.fillRect(x + 4, py, 8, TILE);
+    g.fillStyle = C.wallEdge; g.fillRect(x + 4, py, 1, TILE); g.fillRect(x + 11, py, 1, TILE);
   }
 }
-/** East–west partition, facing the viewer: rail or cap on top, glass pane or wallpaper face, base, shadow on the floor. */
-function drawWallH(g, wl) {
-  for (let i = 0; i < wl.len; i++) {
-    const tx = wl.x + i, x = tx * TILE, y = wl.y * TILE;
-    if (isDoor(tx, wl.y)) { // open doorway: jambs + threshold
+/** East–west partition tile, facing the viewer: rail or cap on top, glass pane or wallpaper face, base, shadow on the floor. */
+function drawWallH(g, t, door) {
+  const tx = t.x, x = tx * TILE, y = t.y * TILE;
+  if (door) { // doorway: jambs + threshold (an open one has none)
+    if (!door.open) {
       g.fillStyle = C.doorDark; g.fillRect(x, y, 2, 14); g.fillRect(x + TILE - 2, y, 2, 14);
       g.fillStyle = C.door; g.fillRect(x + 2, y + 13, TILE - 4, 2);
-      continue;
     }
-    if (wl.glass) {
-      g.fillStyle = C.glass; g.fillRect(x, y + 2, TILE, 11);
-      if (tx % 3 === 0) { g.fillStyle = 'rgba(255,255,255,0.55)'; g.fillRect(x + 8, y + 4, 2, 1); g.fillRect(x + 7, y + 5, 2, 1); g.fillRect(x + 6, y + 6, 2, 1); }
-      g.fillStyle = C.glassDark; g.fillRect(x, y + 2, 1, 11);
-      g.fillStyle = C.glassFrame; g.fillRect(x, y, TILE, 2);
-      g.fillStyle = C.glassDark; g.fillRect(x, y + 13, TILE, 2);
-    } else {
-      g.fillStyle = C.wallFace; g.fillRect(x, y, TILE, 14);
-      g.fillStyle = C.wallStripe; for (let k = 0; k < TILE; k += 4) g.fillRect(x + k, y + 3, 1, 5);
-      g.fillStyle = C.wainscot; g.fillRect(x, y + 8, TILE, 6);
-      g.fillStyle = C.trim; g.fillRect(x, y + 8, TILE, 1);
-      g.fillStyle = C.wallTop; g.fillRect(x, y, TILE, 3); g.fillRect(x, y + 14, TILE, 2);
-    }
-    g.fillStyle = C.floorShade; g.fillRect(x, y + TILE, TILE, 2);
+    return;
   }
+  if (t.glass) {
+    g.fillStyle = C.glass; g.fillRect(x, y + 2, TILE, 11);
+    if (tx % 3 === 0) { g.fillStyle = 'rgba(255,255,255,0.55)'; g.fillRect(x + 8, y + 4, 2, 1); g.fillRect(x + 7, y + 5, 2, 1); g.fillRect(x + 6, y + 6, 2, 1); }
+    g.fillStyle = C.glassDark; g.fillRect(x, y + 2, 1, 11);
+    g.fillStyle = C.glassFrame; g.fillRect(x, y, TILE, 2);
+    g.fillStyle = C.glassDark; g.fillRect(x, y + 13, TILE, 2);
+  } else {
+    g.fillStyle = C.wallFace; g.fillRect(x, y, TILE, 14);
+    g.fillStyle = C.wallStripe; for (let k = 0; k < TILE; k += 4) g.fillRect(x + k, y + 3, 1, 5);
+    g.fillStyle = C.wainscot; g.fillRect(x, y + 8, TILE, 6);
+    g.fillStyle = C.trim; g.fillRect(x, y + 8, TILE, 1);
+    g.fillStyle = C.wallTop; g.fillRect(x, y, TILE, 3); g.fillRect(x, y + 14, TILE, 2);
+  }
+  g.fillStyle = C.floorShade; g.fillRect(x, y + TILE, TILE, 2);
 }
 function drawPlant(g, x, y) {
   g.fillStyle = C.pot; g.fillRect(x + 5, y + 10, 6, 5);
@@ -390,7 +234,6 @@ export function drawReception(g, x, y, w, shadow = true) {
   for (let i = 0; i < w; i += 12) { g.fillRect(x + i + 2, y + 10, 8, 1); g.fillRect(x + i + 2, y + 10, 1, 4); }
   g.fillStyle = '#fff'; g.fillRect(x + w - 9, y + 2, 6, 4); g.fillStyle = '#2ecc71'; g.fillRect(x + 4, y + 3, 3, 2);
 }
-/** Bookshelf against the right wall: its top runs north–south, rising above its tiles; the south end shows a front panel. */
 /** Low bookshelf seen from the front: top board, two rows of spines, plinth. Fits its tile row so readers above it stay clear. */
 function drawBookshelf(g, x, y, w) {
   g.fillStyle = '#9a6538'; g.fillRect(x, y, w, 2);

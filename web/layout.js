@@ -1,0 +1,352 @@
+// Office layouts as data. An office is a w×h grid of 16px tiles holding rooms (rectangles; walls are generated
+// around them) and furniture items. compile() turns one into the geometry the office runs on: walls, doors,
+// walkability, desks, meeting rooms and every spot a cat can go. Pure ESM with no DOM, so the server imports it too.
+export const TILE = 16;
+/** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
+export const WALL_RISE = TILE;
+export const LAYOUT_VERSION = 1;
+export const MIN_W = 20, MIN_H = 14, MAX_W = 64, MAX_H = 40;
+
+/** Room types: floor colors live in tilemap.js. A room's walls are glass when `glass` (default: meeting rooms). */
+export const ROOM_TYPES = {
+  meeting: { label: '회의실', glass: true },
+  lobby: { label: '로비' },
+  lounge: { label: '라운지' },
+  plan: { label: '기획실' },
+  library: { label: '서재' },
+  play: { label: '놀이터', walls: false },
+  office: { label: '사무 공간' },
+};
+
+/**
+ * Furniture. w × h is the footprint the editor moves and overlap-checks; `floor` items (rugs) lie under the rest,
+ * `wall` items hang on the top wall (row 0). Seats and spots are derived in compile().
+ */
+export const ITEM_KINDS = {
+  deskPod: { label: '책상 (2인)', w: 4, h: 2 },
+  meetingTable: { label: '회의 테이블', w: 6, h: 4 },
+  reception: { label: '안내 데스크', w: 3, h: 2, max: 1 },
+  sofa: { label: '소파', w: 3, h: 3 },
+  coffee: { label: '커피 머신', w: 1, h: 1 },
+  rug: { label: '러그', w: 5, h: 5, floor: true },
+  whiteboard: { label: '화이트보드', w: 3, h: 1 },
+  bookshelf: { label: '책장', w: 6, h: 1 },
+  catTree: { label: '캣타워', w: 1, h: 1 },
+  scratchPost: { label: '스크래처', w: 1, h: 1 },
+  yarn: { label: '털실', w: 1, h: 1 },
+  box: { label: '상자', w: 1, h: 1 },
+  wheel: { label: '캣휠', w: 2, h: 1 },
+  cushion: { label: '방석', w: 1, h: 1 },
+  plant: { label: '화분', w: 1, h: 1 },
+  window: { label: '창문', w: 6, h: 1, wall: true },
+  sign: { label: '간판', w: 5, h: 1, wall: true, max: 1 },
+};
+
+/** The original office: meeting rooms A/B (left) and C/D (right) flank the open office; lobby, lounge, planning room and library along the bottom. */
+export const DEFAULT_OFFICE = {
+  v: LAYOUT_VERSION,
+  w: 32, h: 20,
+  door: { x: 3 },
+  rooms: [
+    { id: 'r1', type: 'meeting', name: '회의실 A', x: 1, y: 1, w: 6, h: 5, doors: [{ x: 7, y: 1 }] },
+    { id: 'r2', type: 'meeting', name: '회의실 B', x: 1, y: 7, w: 6, h: 5, doors: [{ x: 7, y: 7 }] },
+    { id: 'r3', type: 'meeting', name: '회의실 C', x: 25, y: 1, w: 6, h: 5, doors: [{ x: 24, y: 1 }] },
+    { id: 'r4', type: 'meeting', name: '회의실 D', x: 25, y: 7, w: 6, h: 5, doors: [{ x: 24, y: 7 }] },
+    { id: 'r5', type: 'lobby', name: '로비', x: 1, y: 13, w: 8, h: 6, doors: [{ x: 8, y: 12, open: true }] }, // opens straight up into the office
+    { id: 'r6', type: 'lounge', name: '라운지', x: 10, y: 13, w: 6, h: 6, doors: [{ x: 12, y: 12 }] },
+    { id: 'r7', type: 'plan', name: '기획실', x: 17, y: 13, w: 5, h: 6, doors: [{ x: 19, y: 12 }] },
+    { id: 'r8', type: 'library', name: '서재', x: 23, y: 13, w: 8, h: 6, doors: [{ x: 23, y: 12 }] },
+    { id: 'r9', type: 'play', name: '놀이터', x: 9, y: 8, w: 14, h: 3, doors: [] }, // row 11 stays clear: the way to the bottom rooms' doors
+  ],
+  items: [
+    ...[[9, 2], [14, 2], [19, 2], [9, 5], [14, 5], [19, 5]].map(([x, y], i) => ({ id: `d${i + 1}`, kind: 'deskPod', x, y })),
+    { id: 't1', kind: 'meetingTable', x: 1, y: 2 }, { id: 't2', kind: 'meetingTable', x: 1, y: 8 },
+    { id: 't3', kind: 'meetingTable', x: 25, y: 2 }, { id: 't4', kind: 'meetingTable', x: 25, y: 8 },
+    { id: 'i1', kind: 'reception', x: 2, y: 13 },
+    { id: 'i2', kind: 'rug', x: 10, y: 14 },
+    { id: 'i3', kind: 'sofa', x: 11, y: 15 },
+    { id: 'i4', kind: 'coffee', x: 15, y: 13 },
+    { id: 'i5', kind: 'whiteboard', x: 18, y: 14 },
+    { id: 'i6', kind: 'bookshelf', x: 24, y: 18 },
+    { id: 'i7', kind: 'catTree', x: 10, y: 9 },
+    { id: 'i8', kind: 'scratchPost', x: 13, y: 9 },
+    { id: 'i9', kind: 'yarn', x: 16, y: 10 },
+    { id: 'i10', kind: 'box', x: 19, y: 9 },
+    { id: 'i11', kind: 'wheel', x: 16, y: 9 },
+    { id: 'i12', kind: 'cushion', x: 21, y: 10 },
+    ...[[1, 13], [6, 13], [10, 10], [23, 10], [15, 18], [17, 18], [30, 13], [23, 18]].map(([x, y], i) => ({ id: `p${i + 1}`, kind: 'plant', x, y })),
+    { id: 'w1', kind: 'window', x: 15, y: 0 },
+    { id: 'w2', kind: 'sign', x: 22, y: 0 },
+  ],
+};
+
+export const cloneOffice = (o) => JSON.parse(JSON.stringify(o));
+const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
+const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;
+export const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
+export const itemRect = (it) => ({ x: it.x, y: it.y, ...(({ w, h }) => ({ w, h }))(itemSize(it)) });
+/** The ring of tiles around a room, where its walls stand. */
+export const ringRect = (r) => ({ x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 });
+
+// ---- compile -------------------------------------------------------------------------
+/** Office data → runtime geometry. Assumes a validated office, but tolerates junk (clips to the map, drops unknown kinds). */
+export function compile(office) {
+  const MAP_W = office.w, MAP_H = office.h;
+  const W = MAP_W * TILE, H = MAP_H * TILE;
+  const door = { x: office.door?.x ?? 3, y: MAP_H - 1 };
+  const spawn = { x: door.x, y: MAP_H - 2 };
+  const rooms = office.rooms || [];
+  const items = (office.items || []).filter((it) => ITEM_KINDS[it.kind]);
+  const byKind = (k) => items.filter((it) => it.kind === k);
+  const inMap = (x, y) => x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
+  const border = (x, y) => x === 0 || y === 0 || x === MAP_W - 1 || y === MAP_H - 1;
+
+  // walls: every non-border ring tile of a walled room that isn't inside a room. 'v' tiles sit on a ring's side
+  // columns (only their top shows), 'h' tiles on its top/bottom rows (they show a face); corners are both.
+  const doors = [];
+  for (const r of rooms) for (const d of r.doors || []) doors.push({ x: d.x, y: d.y, open: !!d.open });
+  const doorAt = (x, y) => doors.find((d) => d.x === x && d.y === y);
+  const walls = new Map(); // key -> { x, y, v, h, glass }
+  for (const r of rooms) {
+    if (!hasWalls(r)) continue;
+    const g = ringRect(r);
+    for (let y = g.y; y < g.y + g.h; y++) for (let x = g.x; x < g.x + g.w; x++) {
+      if (inRect(r, x, y) || !inMap(x, y) || border(x, y)) continue;
+      const k = y * MAP_W + x;
+      const t = walls.get(k) || { x, y, v: false, h: false, glass: false };
+      if (y === g.y || y === g.y + g.h - 1) t.h = true; else t.v = true;
+      if (x === g.x || x === g.x + g.w - 1) t.v = true;
+      t.glass ||= isGlass(r);
+      walls.set(k, t);
+    }
+  }
+  for (const [k, t] of walls) if (rooms.some((r) => inRect(r, t.x, t.y))) walls.delete(k);
+  const wallTiles = [...walls.values()].sort((a, b) => a.y - b.y || a.x - b.x);
+
+  // walkability
+  const blocked = new Uint8Array(MAP_W * MAP_H);
+  const block = (x, y, w = 1, h = 1) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (inMap(i, j)) blocked[j * MAP_W + i] = 1; };
+  block(0, 0, MAP_W, 1); block(0, MAP_H - 1, MAP_W, 1); block(0, 0, 1, MAP_H); block(MAP_W - 1, 0, 1, MAP_H);
+  for (const t of wallTiles) block(t.x, t.y);
+  for (const d of doors) if (inMap(d.x, d.y)) blocked[d.y * MAP_W + d.x] = 0;
+
+  // desks: each pod is [chair][desk][desk][chair], the two cats facing each other in profile; the aisle beside a chair
+  // holds the assistants when every meeting room is taken.
+  const desks = [];
+  for (const p of byKind('deskPod')) {
+    desks.push({ item: p.id, y: p.y, desk: { x: p.x + 1, y: p.y, w: 1, h: 2 }, chair: { x: p.x, y: p.y, face: 'right' }, aisle: p.x - 1 });
+    desks.push({ item: p.id, y: p.y, desk: { x: p.x + 2, y: p.y, w: 1, h: 2 }, chair: { x: p.x + 3, y: p.y, face: 'left' }, aisle: p.x + 4, right: true });
+    block(p.x + 1, p.y, 2, 2);
+  }
+
+  // meeting tables: a 4×2 table inside a 6×4 footprint, four seats above, four below (backs to the viewer), two on
+  // the right, head + one on the left. Named after the room they stand in.
+  const meetings = byKind('meetingTable').map((t) => {
+    const tx = t.x + 1, ty = t.y + 1;
+    const room = rooms.find((r) => inRect(r, tx, ty));
+    const seats = [];
+    for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty - 1 });
+    for (let i = 0; i < 4; i++) seats.push({ x: tx + i, y: ty + 2, back: true });
+    seats.push({ x: tx + 4, y: ty }, { x: tx + 4, y: ty + 1 }, { x: tx - 1, y: ty + 1 });
+    block(tx, ty, 4, 2);
+    const area = room || { x: t.x, y: t.y, w: 6, h: 4 };
+    return { item: t.id, name: room?.name || '회의 테이블', x: area.x, y: area.y, w: area.w, h: area.h, table: { x: tx, y: ty, w: 4, h: 2 }, head: { x: tx - 1, y: ty }, seats };
+  });
+
+  const receptions = byKind('reception').map((r) => ({ item: r.id, counter: { x: r.x, y: r.y + 1, w: 3 }, cat: { x: r.x + 1, y: r.y } }));
+  for (const r of receptions) { block(r.counter.x, r.counter.y, r.counter.w, 1); block(r.cat.x, r.cat.y); }
+  const sofas = byKind('sofa').map((s) => ({ item: s.id, x: s.x, y: s.y, w: 3 }));
+  const coffees = byKind('coffee');
+  const whiteboards = byKind('whiteboard').map((b) => ({ item: b.id, x: b.x, y: b.y, w: 3 }));
+  const bookshelves = byKind('bookshelf').map((b) => ({ item: b.id, x: b.x, y: b.y, w: 6 }));
+  for (const c of coffees) block(c.x, c.y);
+  for (const b of [...whiteboards, ...bookshelves]) block(b.x, b.y, b.w, 1);
+  for (const k of ['catTree', 'scratchPost', 'box', 'plant']) for (const it of byKind(k)) block(it.x, it.y);
+  for (const it of byKind('wheel')) block(it.x, it.y, 2, 1);
+
+  const isBlocked = (x, y) => !inMap(x, y) || blocked[y * MAP_W + x] === 1;
+  // spots on walkable floor only (`on`: the cat sits on the item itself, which blocks walking through)
+  const keep = (spots) => spots.filter((p) => inMap(p.x, p.y) && (p.on || !isBlocked(p.x, p.y)));
+
+  // where idle cats hang out, and what they do there
+  const play = [];
+  for (const it of byKind('catTree')) play.push({ x: it.x, y: it.y, act: 'perch', of: it.id, on: true });   // on top of the cat tree
+  for (const it of byKind('scratchPost')) play.push({ x: it.x - 1, y: it.y, act: 'scratch', of: it.id }); // clawing the post's left side
+  for (const it of byKind('yarn')) play.push({ x: it.x - 1, y: it.y, act: 'bat', of: it.id });           // batting the yarn ball
+  for (const it of byKind('box')) play.push({ x: it.x, y: it.y, act: 'box', of: it.id, on: true });       // sitting in the box
+  for (const it of byKind('wheel')) play.push({ x: it.x, y: it.y, act: 'wheel', of: it.id, on: true });   // running in the wheel
+  for (const it of byKind('cushion')) play.push({ x: it.x, y: it.y, act: 'nap', of: it.id });            // curled up on the cushion
+  // a few lookout spots spread along each play area's top row
+  for (const r of rooms) {
+    if (r.type !== 'play') continue;
+    const row = [];
+    for (let x = r.x; x < r.x + r.w; x++) if (!isBlocked(x, r.y)) row.push(x);
+    const n = Math.min(3, row.length);
+    for (let i = 0; i < n; i++) play.push({ x: row[n === 1 ? 0 : Math.round((i * (row.length - 1)) / (n - 1))], y: r.y, act: 'look' });
+  }
+  const lounge = [];
+  for (const s of sofas) for (let i = 0; i < s.w; i++) lounge.push({ x: s.x + i, y: s.y, sofa: true });
+  for (const c of coffees) lounge.push({ x: c.x - 1, y: c.y }, { x: c.x - 1, y: c.y + 1 });
+  const plan = [];
+  for (const b of whiteboards) for (let x = b.x - 1; x <= b.x + b.w; x++) plan.push({ x, y: b.y + 1, of: b.item }); // in front of the board
+  const library = [];
+  for (const b of bookshelves) for (let x = b.x; x < b.x + b.w - 1; x++) library.push({ x, y: b.y - 1 }); // in front of the shelf
+
+  // overflow standing room: the lobby's open floor below the reception counter, above its bottom row
+  const lobbies = rooms.filter((r) => r.type === 'lobby');
+  const bullpen = [];
+  for (const r of lobbies) {
+    const rc = receptions.find((c) => inRect(r, c.counter.x, c.counter.y));
+    const top = rc ? rc.counter.y + 2 : r.y;
+    for (let y = top; y < r.y + r.h - 1; y++) for (let x = r.x; x < r.x + r.w; x++) if (!isBlocked(x, y)) bullpen.push({ x, y });
+  }
+  if (!bullpen.length) bullpen.push({ ...spawn });
+
+  const geo = {
+    office, TILE, MAP_W, MAP_H, W, H, VIEW_H: H + WALL_RISE, WALL_RISE,
+    door, spawn, rooms, items, wallTiles, doors,
+    desks, meetings, receptions, sofas, coffees, whiteboards, bookshelves,
+    rugs: byKind('rug'), plants: byKind('plant'), windows: byKind('window'), signs: byKind('sign'),
+    yarns: byKind('yarn'), boxes: byKind('box'), wheels: byKind('wheel'), catTrees: byKind('catTree'), scratchPosts: byKind('scratchPost'), cushions: byKind('cushion'),
+    lobby: lobbies[0] || null,
+    playSpots: keep(play), loungeSpots: keep(lounge), planSpots: keep(plan), librarySpots: keep(library), bullpenSpots: bullpen,
+    isBlocked,
+    isDoor: (x, y) => !!doorAt(x, y),
+    doorAt,
+    /** Standing spots in the aisle beside a desk's chair. */
+    nearDeskSpots(i) {
+      const d = desks[i];
+      return [{ x: d.aisle, y: d.y }, { x: d.aisle, y: d.y - 1 }, { x: d.aisle, y: d.y + 1 }];
+    },
+    /** BFS shortest path on the tile grid. Returns tiles after `from` ending at `to`, [] if equal, null if unreachable. */
+    findPath(from, to) {
+      if (from.x === to.x && from.y === to.y) return [];
+      const key = (x, y) => y * MAP_W + x;
+      const prev = new Int32Array(MAP_W * MAP_H).fill(-1);
+      const q = [key(from.x, from.y)];
+      prev[q[0]] = q[0];
+      const target = key(to.x, to.y);
+      let head = 0, found = false;
+      while (head < q.length) {
+        const k = q[head++];
+        if (k === target) { found = true; break; }
+        const x = k % MAP_W, y = (k / MAP_W) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (!inMap(nx, ny) || (isBlocked(nx, ny) && !(nx === to.x && ny === to.y))) continue;
+          const nk = key(nx, ny);
+          if (prev[nk] !== -1) continue;
+          prev[nk] = k;
+          q.push(nk);
+        }
+      }
+      if (!found) return null;
+      const path = [];
+      for (let k = target; k !== key(from.x, from.y); k = prev[k]) path.push({ x: k % MAP_W, y: (k / MAP_W) | 0 });
+      return path.reverse();
+    },
+  };
+  return geo;
+}
+
+/** Number of desks an office has (the server assigns them). */
+export const deskCount = (office) => (office.items || []).filter((it) => it.kind === 'deskPod').length * 2;
+
+// ---- validate -------------------------------------------------------------------------
+/**
+ * Problems that would break the office, as [{ msg, tiles: [{x,y}] }] (empty = fine). Shapes are checked first;
+ * reachability only once the shape is sound. The server runs the same check before saving.
+ */
+export function validate(office) {
+  const errs = [];
+  const err = (msg, tiles = []) => errs.push({ msg, tiles });
+  const int = (n) => Number.isInteger(n);
+  if (!office || typeof office !== 'object') return [{ msg: '배치 데이터가 없습니다.', tiles: [] }];
+  const { w, h } = office;
+  if (!int(w) || !int(h) || w < MIN_W || h < MIN_H || w > MAX_W || h > MAX_H) return [{ msg: `사무실 크기는 ${MIN_W}×${MIN_H} – ${MAX_W}×${MAX_H} 칸이어야 합니다.`, tiles: [] }];
+  if (!int(office.door?.x) || office.door.x < 1 || office.door.x > w - 2) err('정문 위치가 사무실 밖입니다.');
+  const rooms = Array.isArray(office.rooms) ? office.rooms : [];
+  const items = Array.isArray(office.items) ? office.items : [];
+  if (rooms.length > 40 || items.length > 300) return [{ msg: '방이나 가구가 너무 많습니다.', tiles: [] }];
+  const ids = new Set();
+  const cells = (r) => { const t = []; for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) t.push({ x, y }); return t; };
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const both = (a, b) => cells(a).filter((c) => inRect(b, c.x, c.y));
+
+  for (const r of rooms) {
+    if (typeof r?.id !== 'string' || !r.id || ids.has(r.id)) { err('방 id가 잘못되었습니다.'); continue; }
+    ids.add(r.id);
+    if (!ROOM_TYPES[r.type]) { err(`알 수 없는 방 종류: ${r.type}`); continue; }
+    if (typeof r.name !== 'string' || r.name.length > 30) err('방 이름은 30자 이하여야 합니다.');
+    if (![r.x, r.y, r.w, r.h].every(int) || r.w < 2 || r.h < 2 || r.x < 1 || r.y < 1 || r.x + r.w > w - 1 || r.y + r.h > h - 1) { err(`${r.name || '방'}이(가) 사무실 밖으로 나갔습니다.`, cells(r)); continue; }
+    if (!Array.isArray(r.doors)) { err('문 데이터가 잘못되었습니다.'); continue; }
+    const g = ringRect(r);
+    for (const d of r.doors) {
+      const onRing = int(d?.x) && int(d?.y) && inRect(g, d.x, d.y) && !inRect(r, d.x, d.y);
+      const corner = onRing && (d.x === g.x || d.x === g.x + g.w - 1) && (d.y === g.y || d.y === g.y + g.h - 1);
+      if (!onRing || corner || d.x <= 0 || d.y <= 0 || d.x >= w - 1 || d.y >= h - 1) err(`${r.name}의 문은 방 테두리(모서리 제외, 바깥벽 제외)에 있어야 합니다.`, onRing ? [d] : []);
+    }
+    if (hasWalls(r) && !r.doors.length) err(`${r.name}에 문이 없습니다.`, cells(r));
+  }
+  const good = rooms.filter((r) => ROOM_TYPES[r?.type] && [r.x, r.y, r.w, r.h].every(int));
+  for (let i = 0; i < good.length; i++) for (let j = i + 1; j < good.length; j++) {
+    const a = good[i], b = good[j];
+    if (overlap(a, b)) { err(`${a.name}과(와) ${b.name}이(가) 겹칩니다.`, both(a, b)); continue; }
+    // a walled room's ring can't run through another room
+    for (const [x, y] of [[a, b], [b, a]]) if (hasWalls(x) && overlap(ringRect(x), y)) err(`${x.name}의 벽이 ${y.name}을(를) 지나갑니다.`, both(ringRect(x), y));
+  }
+  if (!good.some((r) => r.type === 'lobby')) err('로비가 하나는 있어야 합니다.');
+
+  const count = {};
+  for (const it of items) {
+    if (typeof it?.id !== 'string' || !it.id || ids.has(it.id)) { err('가구 id가 잘못되었습니다.'); continue; }
+    ids.add(it.id);
+    const k = ITEM_KINDS[it.kind];
+    if (!k) { err(`알 수 없는 가구: ${it.kind}`); continue; }
+    count[it.kind] = (count[it.kind] || 0) + 1;
+    if (!int(it.x) || !int(it.y)) { err('가구 위치가 잘못되었습니다.'); continue; }
+    const r = itemRect(it);
+    if (k.wall) { if (it.y !== 0 || it.x < 1 || it.x + r.w > w - 1) err(`${k.label}은(는) 위쪽 벽에만 걸 수 있습니다.`, cells({ ...r, y: 0 })); }
+    else if (it.x < 1 || it.y < 1 || it.x + r.w > w - 1 || it.y + r.h > h - 1) err(`${k.label}이(가) 사무실 밖으로 나갔습니다.`, cells(r).filter((c) => c.x >= 0 && c.y >= 0 && c.x < w && c.y < h));
+  }
+  for (const [kind, n] of Object.entries(count)) if (ITEM_KINDS[kind].max && n > ITEM_KINDS[kind].max) err(`${ITEM_KINDS[kind].label}은(는) ${ITEM_KINDS[kind].max}개까지 둘 수 있습니다.`);
+  if (!count.deskPod) err('책상이 하나는 있어야 합니다.');
+  if (errs.length) return errs;
+
+  // furniture vs furniture (same layer), and vs walls
+  const solid = items.filter((it) => !ITEM_KINDS[it.kind].floor);
+  for (let i = 0; i < solid.length; i++) for (let j = i + 1; j < solid.length; j++) {
+    const a = itemRect(solid[i]), b = itemRect(solid[j]);
+    if (overlap(a, b)) err(`${ITEM_KINDS[solid[i].kind].label}과(와) ${ITEM_KINDS[solid[j].kind].label}이(가) 겹칩니다.`, both(a, b));
+  }
+  const geo = compile(office);
+  const wallAt = new Set(geo.wallTiles.filter((t) => !geo.isDoor(t.x, t.y)).map((t) => `${t.x},${t.y}`));
+  for (const it of items) {
+    if (ITEM_KINDS[it.kind].wall) continue;
+    const hit = cells(itemRect(it)).filter((c) => wallAt.has(`${c.x},${c.y}`) || geo.isDoor(c.x, c.y));
+    if (hit.length) err(`${ITEM_KINDS[it.kind].label}이(가) 벽이나 문 위에 있습니다.`, hit);
+  }
+  if (geo.isBlocked(geo.spawn.x, geo.spawn.y)) err('정문 앞이 막혀 있습니다.', [geo.spawn]);
+  if (errs.length) return errs;
+
+  // everyone must be able to walk from the front door to every seat and spot
+  const seen = new Uint8Array(w * h);
+  const q = [[geo.spawn.x, geo.spawn.y]];
+  seen[geo.spawn.y * w + geo.spawn.x] = 1;
+  while (q.length) {
+    const [x, y] = q.pop();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || seen[ny * w + nx] || geo.isBlocked(nx, ny)) continue;
+      seen[ny * w + nx] = 1; q.push([nx, ny]);
+    }
+  }
+  const reach = (p) => (!geo.isBlocked(p.x, p.y) ? seen[p.y * w + p.x] : [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => seen[(p.y + dy) * w + p.x + dx]));
+  const cut = (label, spots) => { const bad = spots.filter((p) => !reach(p)); if (bad.length) err(`정문에서 갈 수 없는 ${label}이(가) 있습니다.`, bad); };
+  cut('책상 자리', geo.desks.map((d) => d.chair));
+  cut('회의실 자리', geo.meetings.flatMap((m) => [m.head, ...m.seats]));
+  cut('놀이·라운지 자리', [...geo.playSpots, ...geo.loungeSpots]);
+  cut('기획·서재 자리', [...geo.planSpots, ...geo.librarySpots]);
+  return errs;
+}

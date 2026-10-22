@@ -163,7 +163,8 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 ```
 server/   index.mjs(HTTP/SSE) · reducer.mjs(이벤트→상태) · store.mjs(모델/책상/영속화)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
-web/      office.js(진입점) · render.js · sprites.js · tilemap.js · panel.js · launcher.js(새 직원)
+web/      office.js(진입점) · render.js · sprites.js · layout.js(배치 데이터·검증) · tilemap.js(배경 그리기)
+          panel.js · launcher.js(새 직원)
 hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
 commands/ open.md · stop.md (플러그인 슬래시 명령)
