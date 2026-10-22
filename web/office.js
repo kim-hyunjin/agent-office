@@ -266,9 +266,9 @@ function fade(e, now) {
   releaseAll(e);
 }
 
-// ---- activity ticker (all sessions) ---------------------------------------------
+// ---- activity ticker (sessions of the office on screen) ---------------------------
 const FEED_EVENTS = new Set(['PreToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'SessionStart', 'SessionEnd']);
-const FEED_MAX = 500;
+const FEED_MAX = 500; // per office, so a busy office doesn't push a quiet one's history out
 const feed = { seen: new Set(), items: [] };
 function feedFrom(s) {
   let added = false;
@@ -277,18 +277,28 @@ function feedFrom(s) {
     const key = `${s.id}|${e.t}|${e.ev}|${e.tool || ''}|${e.target || ''}`;
     if (feed.seen.has(key)) continue;
     feed.seen.add(key);
-    feed.items.push({ key, t: e.t, name: s.name, agent: /^\[/.test(e.text || ''), e });
+    feed.items.push({ key, t: e.t, officeId: s.officeId, name: s.name, agent: /^\[/.test(e.text || ''), e });
     added = true;
   }
   if (!added) return;
   feed.items.sort((a, b) => b.t - a.t);
-  feed.items.length = Math.min(feed.items.length, FEED_MAX);
+  const per = new Map();
+  feed.items = feed.items.filter((it) => {
+    const n = (per.get(it.officeId) || 0) + 1;
+    per.set(it.officeId, n);
+    return n <= FEED_MAX;
+  });
+  if (s.officeId === world.officeId) renderFeed(true);
+}
+/** Redraw the ticker with the current office's items; `live` = new items arrived (animate, keep the scroll anchored). */
+function renderFeed(live) {
   const ul = document.getElementById('ticker-list');
   const box = ul.parentElement;
+  const items = feed.items.filter((it) => it.officeId === world.officeId);
   // keep the viewport anchored when the user has scrolled back into history
   const prevTop = box.scrollTop, prevH = box.scrollHeight;
-  const newest = feed.items[0]?.key;
-  ul.innerHTML = feed.items.map((it) => {
+  const newest = live ? items[0]?.key : null;
+  ul.innerHTML = items.map((it) => {
     const e = it.e;
     const icon = e.tool ? (ICON[e.tool] || '🔧') : (EV_ICON[e.ev] || '•');
     let what;
@@ -299,7 +309,8 @@ function feedFrom(s) {
     const who = it.agent ? `${esc(it.name)} 🧢` : esc(it.name);
     return `<li class="${it.key === newest ? 'new' : ''}"><time>${fmtTime(e.t)}</time><span class="who ${it.agent ? 'agent' : ''}">${who}</span><span class="ic">${icon}</span><span class="what">${what}</span></li>`;
   }).join('');
-  if (prevTop > 0) box.scrollTop = prevTop + (box.scrollHeight - prevH);
+  if (!live) box.scrollTop = 0;
+  else if (prevTop > 0) box.scrollTop = prevTop + (box.scrollHeight - prevH);
 }
 
 const here = (s) => s.officeId === world.officeId;
@@ -391,6 +402,7 @@ function switchOffice(id) {
   world.layoutJson = JSON.stringify(o.layout);
   applyLayout(o.layout);
   for (const s of world.sessions.values()) if (here(s) && !s.ended) upsertSession(s, true);
+  renderFeed(false);
   roster.update(world);
   renderTabs();
 }
