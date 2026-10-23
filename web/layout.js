@@ -49,16 +49,16 @@ export const ITEM_KINDS = {
  */
 export const DEFAULT_OFFICE = {
   v: LAYOUT_VERSION,
-  w: 32, h: 20,
+  w: 32, h: 19,
   door: { side: 'bottom', x: 3 },
   rooms: [
     { id: 'r1', type: 'meeting', name: '회의실', x: 1, y: 1, w: 6, h: 7, doors: [{ x: 4, y: 8 }] },
     { id: 'r2', type: 'office', name: '사무 공간', x: 8, y: 1, w: 16, h: 7, doors: [{ x: 13, y: 8 }, { x: 18, y: 8 }] },
     { id: 'r3', type: 'library', name: '서재', x: 25, y: 1, w: 6, h: 7, doors: [{ x: 24, y: 3 }] }, // opens into the office
-    { id: 'r4', type: 'lobby', name: '로비', x: 1, y: 11, w: 7, h: 8, doors: [{ x: 6, y: 10, open: true }] },
-    { id: 'r5', type: 'lounge', name: '라운지', x: 9, y: 11, w: 7, h: 8, doors: [{ x: 12, y: 10 }] },
-    { id: 'r6', type: 'plan', name: '기획실', x: 17, y: 11, w: 5, h: 8, doors: [{ x: 19, y: 10 }] },
-    { id: 'r7', type: 'play', name: '놀이터', x: 23, y: 11, w: 8, h: 8, doors: [{ x: 26, y: 10 }] },
+    { id: 'r4', type: 'lobby', name: '로비', x: 1, y: 11, w: 7, h: 7, doors: [{ x: 6, y: 10, open: true }] },
+    { id: 'r5', type: 'lounge', name: '라운지', x: 9, y: 11, w: 7, h: 7, doors: [{ x: 12, y: 10 }] },
+    { id: 'r6', type: 'plan', name: '기획실', x: 17, y: 11, w: 5, h: 7, doors: [{ x: 19, y: 10 }] },
+    { id: 'r7', type: 'play', name: '놀이터', x: 23, y: 11, w: 8, h: 7, doors: [{ x: 26, y: 10 }] },
   ],
   items: [
     ...[[9, 2], [14, 2], [19, 2], [9, 5], [14, 5], [19, 5]].map(([x, y], i) => ({ id: `d${i + 1}`, kind: 'deskPod', x, y })),
@@ -75,7 +75,7 @@ export const DEFAULT_OFFICE = {
     { id: 'i10', kind: 'box', x: 29, y: 17 },
     { id: 'i11', kind: 'wheel', x: 28, y: 14 },
     { id: 'i12', kind: 'cushion', x: 24, y: 17 },
-    ...[[1, 11], [7, 17], [9, 18], [17, 18], [21, 18], [30, 11], [8, 7], [23, 7], [30, 1], [1, 7]].map(([x, y], i) => ({ id: `p${i + 1}`, kind: 'plant', x, y })),
+    ...[[1, 11], [7, 17], [9, 17], [17, 17], [21, 17], [30, 11], [8, 7], [23, 7], [30, 1], [1, 7]].map(([x, y], i) => ({ id: `p${i + 1}`, kind: 'plant', x, y })),
     { id: 'w1', kind: 'window', x: 14, y: 0 },
     { id: 'w2', kind: 'sign', x: 21, y: 0 },
   ],

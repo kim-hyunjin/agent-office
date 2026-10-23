@@ -225,6 +225,7 @@ function drawEntity(g, geo, e, t, selected, hovered) {
   // horizontally centered, except: paws against the post on the next tile, or centered in the 2-tile wheel
   const ox = act === 'scratch' ? TILE + 5 - w : act === 'wheel' ? TILE - Math.round(w / 2) : Math.round((TILE - w) / 2);
   const oy = seatY - h;
+  e.headTop = oy; e.spriteH = h; // for the speech bubble and hit testing (skins can be taller than a cat)
   const bob = !moving && (anim === 'idle' || anim === 'read' || anim === 'sit') && Math.floor((t + e.seed) / 700) % 2 ? 1 : 0;
   g.globalAlpha = e.alpha;
   if (seatY === 14) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, w, 2); } // furniture casts its own
@@ -305,7 +306,8 @@ function drawBubble(ctx, S, e, now, placed, W) {
   const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2;
   const bh = lines.length * lh + pad * 2;
   const isAsst = e.kind === 'assistant';
-  const headX = (e.x + 8) * S, headY = (e.y + (isAsst ? 5 : 2) - 7) * S;
+  const lift = -Math.max(0, (e.spriteH ?? 0) - (isAsst ? 8 : 10)); // taller than a cat: raise the bubble by the difference
+  const headX = (e.x + 8) * S, headY = (e.y + (isAsst ? 5 : 2) - 7 + lift) * S;
   let bx = Math.round(headX - bw / 2), by = Math.round(headY - bh - 3 * S);
   bx = Math.max(2 * S, Math.min(W * S - bw - 2 * S, bx));
   if (by < 18 * S) by = 18 * S;

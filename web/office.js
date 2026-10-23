@@ -18,6 +18,7 @@ const canvas = document.getElementById('office');
 const tabsEl = document.getElementById('tabs');
 const barEl = document.getElementById('bar'); // office tabs + the tool buttons, above the office
 const toolsEl = document.getElementById('tools');
+const stageEl = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const panel = new Panel(document.getElementById('panel'), {
@@ -104,16 +105,22 @@ const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit trans
 // Width the open panel takes from the office. On narrow windows the panel just covers it.
 const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
 
+// Whole-number zoom, like pixel-art games: every art pixel is the same size on screen. At least MIN_SCALE, more when
+// the window has room; an office bigger than the window scrolls instead of shrinking its pixels.
+const MIN_SCALE = 2;
 function fitScale() {
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - barEl.offsetHeight;
-  // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
-  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H) * 20) / 20, 1, 8);
+  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H)), MIN_SCALE, 8);
 }
 
+/** The ticker (bottom) and the panel (right) float over the page: pad the page so the office can scroll out from under them. */
 function placeTicker() {
-  document.getElementById('ticker').style.right = `${panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0}px`;
+  const ticker = document.getElementById('ticker'), side = panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0;
+  ticker.style.right = `${side}px`;
+  stageEl.style.paddingBottom = `${(ticker.hidden ? 0 : ticker.offsetHeight) + 4}px`;
+  stageEl.style.paddingRight = `${side + 4}px`;
 }
 
 /** Fit the office to the window at once (backing store + CSS size). */
@@ -526,7 +533,7 @@ function entAt(lx, ly) {
   let best = null;
   for (const e of world.ents.values()) {
     const isA = e.kind === 'assistant';
-    const x0 = e.x + (isA ? 4 : 3), x1 = e.x + (isA ? 12 : 13), y0 = e.y + (isA ? 3 : 0), y1 = e.y + 16;
+    const x0 = e.x + (isA ? 4 : 3), x1 = e.x + (isA ? 12 : 13), y0 = e.y + Math.min(isA ? 3 : 0, e.headTop ?? 0), y1 = e.y + 16;
     if (lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1 && (!best || e.y > best.y)) best = e;
   }
   return best;

@@ -4,7 +4,7 @@
 // uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
 import {
   FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, spriteSize, breedPalette, RECEPTIONIST_PAL,
-  SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate,
+  SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate, skinScale,
 } from './sprites.js';
 import { esc } from './panel.js';
 
@@ -227,7 +227,7 @@ function draftForm() {
       const label = document.createElement('span');
       label.textContent = SKIN_ROW_LABEL[anim];
       li.append(label);
-      if (rows[anim]) li.append(...rows[anim].map((f) => pic(Object.assign(f, { scale: f.height / 12 }), 2)));
+      if (rows[anim]) li.append(...rows[anim].map((f) => pic(Object.assign(f, { scale: skinScale(f.height) }), 2)));
       else li.append(Object.assign(document.createElement('span'), { className: 'dim', textContent: '없음 — 비슷한 동작으로 대신해요' }));
       return li;
     })));

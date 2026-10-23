@@ -370,7 +370,7 @@ export function sideAnim(pal, anim) {
 // ---- uploaded skins -------------------------------------------------------------------
 // A skin is a PNG sheet of equal cells: one row per animation in SKIN_ROWS order, frames left to right up to the
 // first empty (fully transparent) cell. Missing rows borrow a close pose (skinFrames). Frames are trimmed to one box
-// shared by the whole sheet, so feet and centers line up across poses, and drawn SKIN_H world pixels tall.
+// shared by the whole sheet, so feet and centers line up across poses, and sized by skinScale.
 export const SKIN_ROWS = ['idle', 'walk', 'type', 'read', 'wait', 'phone', 'write', 'sit', 'back', 'side', 'scratch', 'bat'];
 export const SKIN_ROW_LABEL = {
   idle: '앉아 있기 (정면)', walk: '걷기 (오른쪽을 보고)', type: '타이핑', read: '책 읽기', wait: '손 들기', phone: '전화',
@@ -378,7 +378,14 @@ export const SKIN_ROW_LABEL = {
   scratch: '스크래처 긁기', bat: '털실 치기',
 };
 const SKIN_FALLBACK = { type: 'idle', read: 'idle', wait: 'idle', phone: 'wait', write: 'wait', sit: 'idle', scratch: 'idle', back: 'idle', side: 'idle' };
-const SKIN_H = { employee: 12, assistant: 9 }; // an adult cat is at most 12 rows tall (scratching), a kitten about 9
+// Art up to a tile and a half (24 px) tall is drawn pixel for pixel, standing taller than the tiles like characters in
+// most pixel-art games; taller (high-res) sheets shrink to a cat's 12 px. Kittens are three quarters of that.
+const SKIN_NATIVE_MAX = 24, SKIN_H = 12;
+/** Sheet pixels per world pixel for a skin whose trimmed frames are h px tall. */
+export function skinScale(h, kind = 'employee') {
+  const drawn = h <= SKIN_NATIVE_MAX ? h : SKIN_H;
+  return h / (kind === 'assistant' ? drawn * 0.75 : drawn);
+}
 
 const skins = new Map(); // id -> { id, name, cellW, cellH, rows: { anim: [canvas] } once loaded, failed }
 let onSkinsLoaded = () => {};
@@ -457,7 +464,7 @@ function skinSprite(pal, anim, frame) {
   const src = frames[i];
   c = new OffscreenCanvas(src.width, src.height);
   c.getContext('2d').drawImage(src, 0, 0);
-  c.scale = src.height / (SKIN_H[pal.kind] || SKIN_H.employee); // sheet pixels per world pixel
+  c.scale = skinScale(src.height, pal.kind);
   cache.set(key, c);
   return c;
 }
