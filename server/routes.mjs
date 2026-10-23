@@ -1,6 +1,7 @@
 // The HTTP API as a table: [method, path or RegExp, handler]. index.mjs matches in order; RegExp groups arrive
 // as `params`, already %-decoded. Anything unmatched falls through to static files (GET) or 404.
 import fs from 'node:fs';
+import path from 'node:path';
 import { MAX_BODY_BYTES, MAX_PROMPT_CHARS } from './config.mjs';
 import { CAT_FAMILIES, BREED_KEY, DEFAULT_OFFICE_ID } from './store.mjs';
 import { DEFAULT_OFFICE, cloneOffice, normalize, validate } from '../web/layout.js';
@@ -9,7 +10,9 @@ import { hasSkin, skinError } from './skins.mjs';
 import { applyHook } from './reducer.mjs';
 import { sendFile } from './static.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
-import { readBody, tooLarge, json, readJson, findSession, orcaError } from './http.mjs';
+import { readBody, tooLarge, json, readJson, findSession, orcaError, isOwnHost } from './http.mjs';
+import { fileDiff } from './diff.mjs';
+import { scheduleFileSync } from './files.mjs';
 import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
 
 /** @returns {Array<[string, string | RegExp, (ctx: { req, res, url: URL, params: string[] }) => unknown]>} */
@@ -44,6 +47,7 @@ export function makeRoutes({ store, sse }) {
     ['GET', /^\/sessions\/([^/]+)\/log$/, ({ res, params: [id] }) => {
       const s = findSession(store, res, id);
       if (!s) return;
+      if (!s.ended) scheduleFileSync(store, s); // the panel just opened: freshen its worked files
       json(res, 200, { id: s.id, log: s.log.toArray() });
     }],
     ['GET', /^\/sessions\/([^/]+)\/reply$/, ({ res, url, params: [id] }) => {
@@ -53,6 +57,20 @@ export function makeRoutes({ store, sse }) {
       const ent = agentId ? s.subagents.get(agentId) : s;
       if (!ent) { json(res, 404, { error: 'not found' }); return; }
       json(res, 200, { id: s.id, agentId, text: ent.replyText || ent.lastText || '', at: ent.lastTextAt });
+    }],
+    ['GET', /^\/sessions\/([^/]+)\/diff$/, async ({ req, res, url, params: [id] }) => {
+      if (!isOwnHost(req)) { json(res, 403, { error: 'forbidden' }); return; } // whole files go out here: no DNS rebinding
+      const s = findSession(store, res, id);
+      if (!s) return;
+      const file = String(url.searchParams.get('file') || '');
+      const f = file ? s.files.get(path.normalize(file)) : null; // only files this session's tools touched
+      if (!f) { json(res, 404, { error: '이 세션이 작업한 파일이 아닙니다.' }); return; }
+      try {
+        const d = await fileDiff(s.cwd, f.path, { since: s.startedAt - 60_000 });
+        json(res, 200, { file: f.path, ...d });
+      } catch (e) {
+        json(res, e.code === 'not_repo' ? 409 : e.code === 'outside' ? 400 : 502, { error: e.message, code: e.code });
+      }
     }],
     ['POST', /^\/sessions\/([^/]+)\/prompt$/, async ({ req, res, params: [id] }) => {
       const data = await readJson(req, res);
