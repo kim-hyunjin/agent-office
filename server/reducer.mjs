@@ -1,4 +1,5 @@
 import { summarizeToolInput, detailForTool, truncate, cleanText, replyText, oneLine } from './util.mjs';
+import { scheduleFileSync } from './files.mjs';
 
 const TOOL_STATE = [
   [/^(Read|Grep|Glob|LS)$/, 'reading'],
@@ -8,6 +9,13 @@ const TOOL_STATE = [
   [/^(Agent|Task)$/, 'delegating'],
   [/^AskUserQuestion$/, 'waiting'],
 ];
+const EDIT_TOOLS = /^(Edit|Write|MultiEdit|NotebookEdit)$/;
+const FILE_TOOLS = /^(Read|Edit|Write|MultiEdit|NotebookEdit)$/;
+/** Remember the file a Read/Edit/Write… call names (the panel's "worked files", and what /diff may show). */
+function touchFile(store, s, tool, input) {
+  const fp = FILE_TOOLS.test(tool) && input ? input.file_path || input.notebook_path : null;
+  if (typeof fp === 'string' && fp) store.touchFile(s, fp, { edited: EDIT_TOOLS.test(tool) });
+}
 function stateForTool(tool) {
   for (const [re, st] of TOOL_STATE) if (re.test(tool)) return st;
   return 'working';
@@ -63,6 +71,7 @@ function apply(store, ev) {
       const detail = detailForTool(tool, ev.tool_input);
       ent.currentTool = { name: tool, target, detail, startedAt: now, toolUseId: ev.tool_use_id || null };
       if (agent) agent.toolCount++; else s.turnTools++;
+      touchFile(store, s, tool, ev.tool_input); // subagents' files count as the session's
       if (!agent && /^(Agent|Task)$/.test(tool) && ev.tool_input) {
         const inp = ev.tool_input;
         s.pendingAgents.push({ type: inp.subagent_type || null, description: oneLine(inp.description || ''), task: cleanText(inp.prompt || '', 600), toolUseId: ev.tool_use_id || null, at: now });
@@ -78,6 +87,8 @@ function apply(store, ev) {
       const target = summarizeToolInput(tool, ev.tool_input);
       ent.currentTool = null;
       if (ent.state !== 'offduty') store.setState(ent, 'thinking');
+      touchFile(store, s, tool, ev.tool_input); // again now that the file is written: an open diff dialog reloads on the new time
+      if (EDIT_TOOLS.test(tool) || tool === 'Bash') scheduleFileSync(store, s); // git status catches what the shell changed
       const err = name === 'PostToolUseFailure' ? truncate(oneLine(ev.error || 'failed'), 200) : '';
       const result = typeof ev.tool_response_head === 'string' ? truncate(oneLine(ev.tool_response_head), 240) : '';
       store.log(s, { ev: name, tool, target, text: who + err, result, ms: ev.duration_ms, len: ev.tool_response_len });
@@ -106,6 +117,7 @@ function apply(store, ev) {
       }));
       if (text) { ent.lastText = text; ent.lastTextAt = now; ent.replyText = replyText(ev.last_assistant_message); }
       store.log(s, { ev: name, text: who + truncate(text, 200) });
+      if (!agent) scheduleFileSync(store, s);
       break;
     }
     case 'SubagentStart': {

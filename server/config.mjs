@@ -25,6 +25,13 @@ export const WEB_DIR = path.resolve(import.meta.dirname, '../web');
 export const SEATS_PER_DESK = 3;
 export const LOG_SIZE = 100;
 export const SNAPSHOT_LOG = 30;
+export const MAX_FILES = 200;       // files remembered per session (the panel's "worked files")
+export const SNAPSHOT_FILES = 40;   // of those, how many each session event carries
+export const MAX_DIFF_BYTES = 2 * 1024 * 1024; // git output read per diff request
+export const MAX_DIFF_CHARS = 400_000;         // patch length sent to the browser
+export const GIT_TIMEOUT_MS = 5_000;
+export const FILES_DEBOUNCE_MS = 1_000;  // git status after an edit / shell command, at most this often per session
+export const FILES_SYNC_MS = 15_000;     // …and this often regardless, for changes no hook announces
 
 export const SUBAGENT_TTL_MS = 10_000;        // remove ended subagents after
 export const SUBAGENT_STALE_MS = 10 * 60_000; // subagent with no events for this long is considered finished

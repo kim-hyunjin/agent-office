@@ -5,7 +5,7 @@ Claude Code 세션들이 일하는 모습을 **픽셀아트 사무실**로 보�
 - 터미널에서 띄운 `claude` 세션 하나 = 직원 한 명. 책상에 앉아 파일을 읽고, 코드를 고치고, 터미널을 두드립니다.
 - `Agent` 툴로 띄운 서브에이전트 = 옆자리 보조 직원. 일이 끝나면 사라집니다.
 - 권한 승인을 기다리면 손을 들고 `!`, 답변이 끝나면 말풍선, 세션이 끝나면 문으로 퇴근합니다.
-- 직원을 클릭하면 오른쪽 패널에 활동 로그가 나옵니다. 패널의 답변 카드를 누르면 전체 답변을 마크다운으로 크게 볼 수 있습니다.
+- 직원을 클릭하면 오른쪽 패널에 활동 로그가 나옵니다. 패널의 답변 카드를 누르면 전체 답변을 마크다운으로 크게 볼 수 있고, 작업한 파일을 누르면 그 파일의 git diff가 열립니다.
 
 의존성 없음. Node 24 이상만 있으면 됩니다.
 
@@ -41,7 +41,7 @@ claude                 # 아무 터미널, 아무 레포에서 평소처럼 사�
 ```bash
 pnpm demo              # Claude 없이 가짜 직원 2명으로 화면 확인
 pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
-pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 테스트
+pnpm test              # node --test: 공유 상수·레이아웃 순수 함수, 파일 diff 테스트
 ```
 
 `pnpm`이 없으면 `node server/index.mjs`, `node hooks/install.mjs` 처럼 직접 실행해도 됩니다.
@@ -53,6 +53,7 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 
 | **Claude Code hooks** (`SessionStart/End`, `UserPromptSubmit`, `Pre/PostToolUse`, `PermissionRequest`, `Notification`, `Stop`, `SubagentStart/Stop` 등) | 상태 변화의 주 소스. `async` command hook이라 Claude를 기다리게 하지 않고, 훅 스크립트는 아무것도 출력하지 않아 **토큰을 쓰지 않습니다**. |
 | `~/.claude/sessions/<pid>.json` | 살아있는 세션 목록. hook 설치 전에 시작된 세션도 여기서 잡아 표시합니다(존재·바쁨 여부만). 프로세스가 죽으면 퇴근 처리. |
 | transcript (`~/.claude/projects/.../<session>.jsonl`) | 세션 제목, 모델, 최근 답변 텍스트(말풍선). 상태는 바꾸지 않습니다. |
+| `git status` / `git diff` (세션의 작업 폴더) | 패널의 작업한 파일 목록과 파일 diff. 훅 없이 시작한 세션이나 서버 재시작 뒤에도 변경 파일이 보입니다. |
 
 서버(`server/`)는 `POST /hook`으로 이벤트를 받아 상태를 갱신하고 `GET /events`(SSE)로 브라우저에 밀어줍니다.
 책상 배정은 `~/.pawgents-office/state.json`에 기억되어 서버를 재시작해도 같은 세션은 같은 자리에 앉습니다.
@@ -123,6 +124,8 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 
 |---|---|
 | 마우스 올리기 | 현재 지시(프롬프트), 툴 상세(전체 명령·경로·패턴), 생각 중인 내용, 보조 직원이 받은 임무 |
 | 직원 클릭 (패널) | 현재 작업과 소요 시간, 이번 턴 툴 횟수·경과, 비용과 변경 줄 수, 지시문, 생각 중, 보조 직원별 임무·현재 툴, 작업한 파일, 활동 로그(툴 상세 + 결과 앞부분 + 소요 시간) |
+| 작업한 파일 | 세션 워크트리의 `git status`(수정·추가·삭제·새 파일)와 이 세션의 툴이 읽거나 고친 파일(훅)을 합친 목록. git 쪽은 서버를 재시작해도 남고 셸이나 손으로 바꾼 파일도 잡으며, 편집·셸 툴이 끝날 때와 패널을 열 때, 그리고 15초마다 갱신됩니다. 같은 워크트리에서 일하는 다른 세션의 변경도 같이 보입니다 |
+| 작업한 파일 클릭 | 그 파일의 git diff(작업 트리 vs HEAD). 아직 git에 없는 새 파일은 전체가 추가로, 세션 중에 이미 커밋했으면 그 커밋의 변경이 보입니다. 세션이 그 파일을 다시 고치면 열린 창이 갱신됩니다. 서브에이전트나 셸 명령으로 바꾼 내용도 git이 보는 대로 나옵니다 (git 저장소 밖이면 안내만) |
 | 직원 목록 ("목록 ▾") | 모든 사무실 직원의 상태와 위치(자리·회의실·기획 보드·서가·놀이터·로비 등) |
 | 화면 하단 활동 기록 | 모든 세션의 툴 사용·지시·답변이 최신순으로 쌓임. 스크롤하면 최근 500건까지 볼 수 있음 |
 
@@ -139,7 +142,7 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 
 
 세션과 터미널은 훅이 보내는 `ORCA_TERMINAL_HANDLE`로 연결합니다(Orca가 관리 터미널에 넣어 주는 변수). 훅이 아직 안 온 세션은 같은 워크트리의 claude 터미널이 하나뿐일 때만 자동으로 짝을 짓습니다. 후보가 여럿이면 그 세션에서 한 번 프롬프트를 보내 연결하세요.
 
-터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /orca/launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다.
+터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /orca/launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다. 파일 내용이 통째로 나가는 `GET /sessions/:id/diff`는 Host를 검사하고, 그 세션의 툴이 실제로 연 파일만 보여줍니다.
 
 ## 모델별 외형 (직급)
 
@@ -196,18 +199,18 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 
 
 ```
 server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · http.mjs(요청 처리 공용) · skins.mjs(스킨 id·검증)
-          reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
+          reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별) · diff.mjs(git diff·status) · files.mjs(작업한 파일 동기화)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
 web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루프) · world.js(상태·자리·동선) · feed.js(티커) · viewport.js(배율·줌·리핏)
           render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
           layout.js(배치 데이터·검증, 서버와 공유) · limits.js(이름·인원·스킨 한도, 서버와 공유) · editor.js(배치 편집)
           layout-edit.js(배치 편집 연산, DOM 없음) · editor-draw.js(편집 오버레이) · panel.js · roster.js(직원 목록)
-          launcher.js(새 직원) · legend.js(모델 안내) · reply.js(전체 답변 창) · markdown.js
+          launcher.js(새 직원) · legend.js(모델 안내) · reply.js(전체 답변 창) · diff.js(파일 diff 창) · markdown.js
           api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미, 상태 이름·색·툴 아이콘)
 hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
-test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트)
+test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트) · diff.test.mjs(임시 git 저장소로 diff 상태 검사)
 commands/ open.md · stop.md (플러그인 슬래시 명령)
 .claude-plugin/  plugin.json · marketplace.json
 ```

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
-import { PORT, HOST, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR } from './config.mjs';
+import { PORT, HOST, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, FILES_SYNC_MS, STATE_FILE, PID_FILE, DATA_DIR } from './config.mjs';
+import { syncAllFiles } from './files.mjs';
 import { Store } from './store.mjs';
 import { Sse } from './sse.mjs';
 import { serveStatic } from './static.mjs';
@@ -15,9 +16,10 @@ const sse = new Sse();
 store.on((type, data) => sse.send(type, data));
 const tailer = new Tailer(store);
 
-// Boot: rebuild from the live session registry + transcripts before accepting clients.
+// Boot: rebuild from the live session registry + transcripts before accepting clients; worked files come from git status.
 pollRegistry(store);
 tailer.tick();
+syncAllFiles(store);
 
 const routes = makeRoutes({ store, sse });
 const notFound = (res) => { res.writeHead(404); res.end('not found'); };
@@ -64,6 +66,7 @@ server.listen(PORT, HOST, () => {
 setInterval(() => store.gc(), GC_INTERVAL_MS).unref();
 setInterval(() => pollRegistry(store), REGISTRY_POLL_MS).unref();
 setInterval(() => tailer.tick(), TRANSCRIPT_POLL_MS).unref();
+setInterval(() => syncAllFiles(store), FILES_SYNC_MS).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { store.saveNow(); process.exit(0); });

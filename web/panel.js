@@ -1,10 +1,10 @@
 import { FAMILIES, familyOf } from './sprites.js';
 import { openReply, refreshReply } from './reply.js';
+import { openDiff, refreshDiff } from './diff.js';
 import { api, post, closeSession } from './api.js';
 import { esc, fmtTime, setMsg, ICON, EV_ICON, MODE_LABEL, BUSY, STATE_LABEL, STATE_COLOR, awaitingBg, bgSummary, toolText, thinkingFresh } from './ui.js';
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const READ_TOOLS = new Set(['Read']);
+const GIT_LABEL = { M: '수정됨 (git)', A: '추가됨 (git)', D: '삭제됨 (git)', '?': '새 파일 (아직 git에 없음)', R: '이름 바뀜 (git)', C: '복사됨 (git)', U: '충돌 (git)' };
 
 export class Panel {
   constructor(el, { onOpen, onClose } = {}) {
@@ -34,6 +34,10 @@ export class Panel {
     const last = el.querySelector('#p-last');
     last.addEventListener('click', () => { if (this.session) openReply(this.session); });
     last.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && this.session) { e.preventDefault(); openReply(this.session); } });
+    el.querySelector('#p-files').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-file]');
+      if (b && this.session) openDiff(this.session, b.dataset.file);
+    });
     this.timer = setInterval(() => { if (this.id && this.session) this.renderMeta(this.session); }, 1000);
   }
 
@@ -75,6 +79,7 @@ export class Panel {
     this.renderMeta(session);
     this.addEntries(session.log || []);
     refreshReply(session);
+    refreshDiff(session);
   }
 
   remove(id) { this.drafts.delete(id); if (id === this.id) this.close(); }
@@ -204,20 +209,15 @@ export class Panel {
     this.renderCompose(s);
   }
 
+  /**
+   * Worked files, newest first: what git status lists for the worktree plus what this session's tools read or
+   * edited (the server merges both). A chip opens that file's diff.
+   */
   renderFiles() {
     const el = this.el.querySelector('#p-files');
-    const files = new Map(); // target -> { edited, read, t }
-    for (const e of this.entries.values()) {
-      if (e.ev !== 'PreToolUse' || !e.target) continue;
-      const edited = EDIT_TOOLS.has(e.tool), read = READ_TOOLS.has(e.tool);
-      if (!edited && !read) continue;
-      const f = files.get(e.target) || { edited: false, read: false, t: 0, path: '' };
-      f.edited ||= edited; f.read ||= read; f.t = Math.max(f.t, e.t);
-      if (e.detail && !f.path) f.path = e.detail.split('  (')[0];
-      files.set(e.target, f);
-    }
-    const list = [...files.entries()].sort((a, b) => b[1].t - a[1].t).slice(0, 14);
-    el.innerHTML = list.length ? `<h3>작업한 파일</h3><div class="chips">${list.map(([name, f]) => `<span class="chip ${f.edited ? 'edited' : ''}" title="${esc(f.path || name)}">${f.edited ? '✏️' : '📖'} ${esc(name)}</span>`).join('')}</div>` : '';
+    const list = (this.session?.files || []).slice(0, 20);
+    const html = list.length ? `<h3>작업한 파일</h3><div class="chips">${list.map((f) => `<button type="button" class="chip ${f.edited ? 'edited' : ''}" data-file="${esc(f.path)}" title="${esc(f.path)}&#10;${GIT_LABEL[f.git] || (f.edited ? '이 세션이 편집함 (커밋됨)' : '읽기만 함')}&#10;클릭: diff 보기">${f.git === 'D' ? '🗑️' : f.edited ? '✏️' : '📖'} ${esc(f.name)}</button>`).join('')}</div>` : '';
+    if (html !== el.dataset.html) { el.innerHTML = html; el.dataset.html = html; } // redrawn every second: keep hover/focus
   }
 
   addEntries(entries) {
@@ -228,7 +228,7 @@ export class Panel {
       this.entries.set(key, e);
       added = true;
     }
-    if (added) { this.renderLog(); this.renderFiles(); }
+    if (added) this.renderLog();
   }
 
   renderLog() {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  SEATS_PER_DESK, LOG_SIZE, SNAPSHOT_LOG, DESK_MEMORY_MS,
+  SEATS_PER_DESK, LOG_SIZE, SNAPSHOT_LOG, MAX_FILES, SNAPSHOT_FILES, DESK_MEMORY_MS,
   SUBAGENT_TTL_MS, SUBAGENT_STALE_MS, SESSION_TTL_MS, ORPHAN_SESSION_MS, STATE_FILE, SKINS_DIR,
 } from './config.mjs';
 import { debounce, safeJsonParse } from './util.mjs';
@@ -284,6 +284,7 @@ export class Store {
       transcriptPath: init.transcriptPath || null,
       orcaTerminal: this.desks[id]?.terminal || null, // Orca terminal handle (hook env or resolved) for sending prompts
       log: new RingBuffer(LOG_SIZE),
+      files: new Map(),    // normalized path -> { path, name, edited, touched, git, t }: files its tools touched (touched) and/or git status lists (git)
       subagents: new Map(),
     };
     this.sessions.set(id, s);
@@ -353,6 +354,49 @@ export class Store {
     s.log.push({ t: Date.now(), ...entry });
   }
 
+  /** Note a file a tool call touched (relative paths resolve against the session's cwd). The newest MAX_FILES are kept. */
+  touchFile(s, fp, { edited = false } = {}) {
+    const f = this.fileEntry(s, fp);
+    f.edited ||= edited; f.touched = true;
+    this.bumpFile(s, f, Date.now());
+    return f;
+  }
+  fileEntry(s, fp) {
+    const key = path.normalize(path.isAbsolute(fp) ? fp : path.resolve(s.cwd || '', fp));
+    return s.files.get(key) || { path: key, name: path.basename(key), edited: false, touched: false, git: null, t: 0 };
+  }
+  /** Move a file to the newest end (Map order is touch order) with time `t`, dropping the oldest past MAX_FILES. */
+  bumpFile(s, f, t) {
+    f.t = Math.max(f.t, t);
+    s.files.delete(f.path); s.files.set(f.path, f);
+    if (s.files.size > MAX_FILES) s.files.delete(s.files.keys().next().value);
+  }
+  /**
+   * Fold `git status` of the session's worktree into its files: [{ path, status }] with one letter each
+   * (M, A, D, ?, …). Files git no longer lists lose their mark, or go entirely if no tool of this session touched
+   * them. A file git alone knows is ordered by its mtime. Returns true if anything changed.
+   */
+  setGitFiles(s, list) {
+    let changed = false;
+    const seen = new Set();
+    for (const { path: fp, status } of list) {
+      const f = this.fileEntry(s, fp);
+      seen.add(f.path);
+      if (f.git === status && s.files.has(f.path)) continue;
+      changed = true;
+      f.git = status; f.edited = true;
+      let t = f.t;
+      if (!t) { try { t = fs.statSync(f.path).mtimeMs; } catch { t = Date.now(); } } // deleted: now
+      this.bumpFile(s, f, t);
+    }
+    for (const f of [...s.files.values()]) {
+      if (!f.git || seen.has(f.path)) continue;
+      changed = true;
+      if (f.touched) f.git = null; else s.files.delete(f.path);
+    }
+    return changed;
+  }
+
   // ---- gc ------------------------------------------------------------------
   gc() {
     const now = Date.now();
@@ -394,6 +438,7 @@ export class Store {
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, ended: s.ended, endedAt: s.endedAt,
       officeId: s.officeId, desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
       subagents: [...s.subagents.values()].map((a) => this.serializeSubagent(a)),
+      files: [...s.files.values()].reverse().slice(0, SNAPSHOT_FILES).map(({ path: p, name, edited, git, t }) => ({ path: p, name, edited, git, t })), // newest first (see bumpFile)
       log: s.log.last(logCount),
     };
   }

@@ -35,9 +35,11 @@ export function json(res, status, data) {
 // Endpoints that type into terminals must come from our own page: a same-origin JSON POST.
 // Host check blocks DNS rebinding; Origin + JSON content-type block cross-site form/fetch posts.
 const OWN_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+/** The Host header names us (not a DNS-rebound name): enough for GETs that hand out source code. */
+export const isOwnHost = (req) => OWN_HOSTS.has(req.headers.host || '');
 function isOwnPage(req) {
   const host = req.headers.host || '';
-  return OWN_HOSTS.has(host) && req.headers.origin === `http://${host}`
+  return isOwnHost(req) && req.headers.origin === `http://${host}`
     && /^application\/json(;|$)/i.test(req.headers['content-type'] || '');
 }
 
