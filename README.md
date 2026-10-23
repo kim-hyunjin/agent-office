@@ -41,6 +41,7 @@ claude                 # 아무 터미널, 아무 레포에서 평소처럼 사�
 ```bash
 pnpm demo              # Claude 없이 가짜 직원 2명으로 화면 확인
 pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
+pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 테스트
 ```
 
 `pnpm`이 없으면 `node server/index.mjs`, `node hooks/install.mjs` 처럼 직접 실행해도 됩니다.
@@ -206,6 +207,7 @@ web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루�
           api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미, 상태 이름·색·툴 아이콘)
 hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
+test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트)
 commands/ open.md · stop.md (플러그인 슬래시 명령)
 .claude-plugin/  plugin.json · marketplace.json
 ```
