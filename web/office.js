@@ -2,6 +2,7 @@ import { DEFAULT_OFFICE, inRect } from './layout.js';
 import { paletteFor, familyOf, FAMILIES, setBreedChoices, setSkins, onSkinLoad, sprite } from './sprites.js';
 import { render, STATE_LABEL, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
+import { drawEditorOverlay } from './editor-draw.js';
 import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
 import { openLauncher } from './launcher.js';
@@ -284,7 +285,7 @@ function frame(now) {
   const wall = Date.now();
   fadeStep(wall, dt);
   render(ctx, S, world, wall);
-  if (editor.isOpen) editor.draw(ctx, S);
+  if (editor.isOpen) drawEditorOverlay(ctx, S, editor);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

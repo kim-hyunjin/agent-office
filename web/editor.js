@@ -2,8 +2,8 @@
 // the palette, the selection and the office's size. Rooms are dragged out as rectangles (walls follow), moved by
 // their inside, resized by their corners; clicking a wall tile cycles door → open passage → wall. Clicking an outer
 // wall moves the front door there (or drag the door along the walls). Furniture is placed from the palette and dragged around. Every change is validated (layout.js) and problem tiles turn red;
-// saving sends the draft to the server, which pushes it to every open office.
-import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, DOOR_SIDES, doorFor, doorTiles, hasWalls } from './layout.js';
+// saving sends the draft to the server, which pushes it to every open office. The canvas overlay is editor-draw.js.
+import { TILE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, DOOR_SIDES, doorFor, hasWalls } from './layout.js';
 import { contents, fixDoors, fixFrontDoor, itemAt, moveItem, moveRoom, onOuterWall, roomAt, roomName, wallRoomsAt } from './layout-edit.js';
 import { clamp } from './anim.js';
 import { buildBackground, FLOOR } from './tilemap.js';
@@ -228,72 +228,6 @@ export class Editor {
     if (wallRoomsAt(this.draft, t.tx, t.ty).length || this.draft.rooms.some((r) => r.doors.some((d) => d.x === t.tx && d.y === t.ty))) return 'pointer';
     if (roomAt(this.draft, t.tx, t.ty)) return 'move';
     return 'default';
-  }
-
-  // ---- overlay -------------------------------------------------------------------------
-  draw(ctx, S) {
-    const geo = this.world.view.geo, d = this.draft;
-    ctx.save();
-    ctx.setTransform(S, 0, 0, S, 0, WALL_RISE * S);
-    const px = 1 / S;
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    for (let x = 1; x < geo.MAP_W; x++) ctx.fillRect(x * TILE, 0, px, geo.H);
-    for (let y = 1; y < geo.MAP_H; y++) ctx.fillRect(0, y * TILE, geo.W, px);
-    // problems
-    ctx.fillStyle = 'rgba(239,68,68,0.45)';
-    for (const e of this.errs) for (const t of e.tiles) ctx.fillRect(t.x * TILE, t.y * TILE, TILE, TILE);
-    // rooms: dashed outline, selected one solid with corner handles
-    ctx.lineWidth = 2 * px;
-    for (const r of d.rooms) {
-      const on = this.sel?.id === r.id;
-      ctx.setLineDash(on ? [] : [4 * px, 3 * px]);
-      ctx.strokeStyle = on ? '#ffd166' : 'rgba(255,255,255,0.55)';
-      ctx.strokeRect(r.x * TILE, r.y * TILE, r.w * TILE, r.h * TILE);
-      if (on) {
-        ctx.fillStyle = '#ffd166';
-        for (const [x, y] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]) ctx.fillRect(x * TILE - 2.5, y * TILE - 2.5, 5, 5);
-      }
-    }
-    ctx.setLineDash([]);
-    // selected / hovered furniture
-    const it = this.sel?.kind === 'item' && this.selected();
-    if (it) { const b = itemRect(it); ctx.strokeStyle = '#ffd166'; ctx.strokeRect(b.x * TILE, (ITEM_KINDS[it.kind].wall ? -1 : b.y) * TILE, b.w * TILE, (ITEM_KINDS[it.kind].wall ? 2 : b.h) * TILE); }
-    // front door, and where a click on the outer wall would move it
-    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2 * px;
-    ctx.strokeRect(geo.door.x * TILE + px, geo.door.y * TILE + px, TILE - 2 * px, TILE - 2 * px);
-    const h = this.hover;
-    if (h && (!this.drag || this.drag.kind === 'door') && this.tool === 'select' && onOuterWall(this.draft, h.tx, h.ty) && !itemAt(this.draft, h.tx, h.ty)) {
-      const g = doorTiles({ ...d, door: doorFor(d, h.tx, h.ty) }).door;
-      ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(g.x * TILE, g.y * TILE, TILE, TILE);
-    } else if (h && !this.drag) {
-      if (this.tool.startsWith('item:')) {
-        const k = ITEM_KINDS[this.tool.slice(5)], x = clamp(h.tx - Math.floor((k.w - 1) / 2), 1, d.w - 1 - k.w), y = k.wall ? 0 : clamp(h.ty, 1, d.h - 1 - k.h);
-        ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(x * TILE, (k.wall ? -1 : y) * TILE, k.w * TILE, (k.wall ? 2 : k.h) * TILE);
-      } else if (this.tool === 'select') {
-        const hi = itemAt(this.draft, h.tx, h.ty);
-        if (hi && hi !== it) { const b = itemRect(hi); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = px; ctx.strokeRect(b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE); }
-        else if (!hi && (wallRoomsAt(this.draft, h.tx, h.ty).length || geo.isDoor(h.tx, h.ty))) { ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2 * px; ctx.strokeRect(h.tx * TILE + px, h.ty * TILE + px, TILE - 2 * px, TILE - 2 * px); }
-      } else {
-        ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(h.tx * TILE, h.ty * TILE, TILE, TILE);
-      }
-    }
-    if (this.drag?.kind === 'new-room') {
-      const g = this.drag, x = Math.min(g.x0, g.x1), y = Math.min(g.y0, g.y1);
-      const a = FLOOR[g.type]?.[0] || '#cdb089';
-      ctx.globalAlpha = 0.6; ctx.fillStyle = a; ctx.fillRect(x * TILE, y * TILE, (Math.abs(g.x1 - g.x0) + 1) * TILE, (Math.abs(g.y1 - g.y0) + 1) * TILE); ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2 * px; ctx.strokeRect(x * TILE, y * TILE, (Math.abs(g.x1 - g.x0) + 1) * TILE, (Math.abs(g.y1 - g.y0) + 1) * TILE);
-    }
-    // room names, screen space
-    ctx.setTransform(1, 0, 0, 1, 0, WALL_RISE * S);
-    ctx.font = `11px ${getComputedStyle(document.body).fontFamily}`; ctx.textBaseline = 'top';
-    for (const r of d.rooms) {
-      const type = ROOM_TYPES[r.type]?.label || r.type;
-      const label = r.name.startsWith(type) ? r.name : `${r.name} · ${type}`; // "회의실 A", not "회의실 A · 회의실"
-      const w = ctx.measureText(label).width + 8;
-      ctx.fillStyle = 'rgba(20,22,40,0.8)'; ctx.fillRect(r.x * TILE * S + 3, r.y * TILE * S + 3, w, 16);
-      ctx.fillStyle = this.sel?.id === r.id ? '#ffd166' : '#e8eaf2'; ctx.fillText(label, r.x * TILE * S + 7, r.y * TILE * S + 6);
-    }
-    ctx.restore();
   }
 
   // ---- panel -----------------------------------------------------------------------------
