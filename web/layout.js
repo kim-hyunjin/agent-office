@@ -121,7 +121,7 @@ export function normalize(o) {
   };
 }
 export const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
+export const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;
 const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
 export const itemRect = (it) => ({ x: it.x, y: it.y, ...(({ w, h }) => ({ w, h }))(itemSize(it)) });

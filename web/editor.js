@@ -3,7 +3,9 @@
 // their inside, resized by their corners; clicking a wall tile cycles door → open passage → wall. Clicking an outer
 // wall moves the front door there (or drag the door along the walls). Furniture is placed from the palette and dragged around. Every change is validated (layout.js) and problem tiles turn red;
 // saving sends the draft to the server, which pushes it to every open office.
-import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, ringRect, DOOR_SIDES, doorFor, doorTiles } from './layout.js';
+import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, DOOR_SIDES, doorFor, doorTiles, hasWalls } from './layout.js';
+import { contents, fixDoors, fixFrontDoor, itemAt, moveItem, moveRoom, onOuterWall, roomAt, roomName, wallRoomsAt } from './layout-edit.js';
+import { clamp } from './anim.js';
 import { buildBackground, FLOOR } from './tilemap.js';
 import { api, post } from './api.js';
 import { esc, setMsg, downloadBlob } from './ui.js';
@@ -11,9 +13,6 @@ import { MAX_NAME_CHARS } from './limits.js';
 
 const $ = (id) => document.getElementById(id);
 const uid = (p) => `${p}${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
-const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const UNDO_MAX = 100;
 const SHARE_TYPE = 'pawgents-office-layout'; // marks an exported layout file
 
@@ -110,75 +109,10 @@ export class Editor {
   nudge(dx, dy) {
     const s = this.selected();
     if (!s) return;
-    this.change(() => (this.sel.kind === 'room' ? this.moveRoom(s, s.x + dx, s.y + dy, this.contents(s)) : this.moveItem(s, s.x + dx, s.y + dy)));
-  }
-
-  // ---- geometry helpers -------------------------------------------------------------
-  /** Where a new or reshaped room gets its door: middle of its bottom wall, else the top, else a side. */
-  autoDoor(r) {
-    const { h, w } = this.draft;
-    const mx = r.x + Math.floor(r.w / 2), my = r.y + Math.floor(r.h / 2);
-    if (r.y + r.h < h - 1) return { x: mx, y: r.y + r.h };
-    if (r.y - 1 > 0) return { x: mx, y: r.y - 1 };
-    if (r.x + r.w < w - 1) return { x: r.x + r.w, y: my };
-    return { x: r.x - 1, y: my };
-  }
-  /** Keep only doors still on the room's ring (corners excluded); a walled room always keeps one. */
-  fixDoors(r) {
-    const g = ringRect(r);
-    r.doors = r.doors.filter((d) => inRect(g, d.x, d.y) && !inRect(r, d.x, d.y)
-      && !((d.x === g.x || d.x === g.x + g.w - 1) && (d.y === g.y || d.y === g.y + g.h - 1)));
-    if (hasWalls(r) && !r.doors.length) r.doors.push(this.autoDoor(r));
-  }
-  /** Furniture standing entirely inside a room moves with it. */
-  contents(r) {
-    return this.draft.items.filter((it) => {
-      if (ITEM_KINDS[it.kind].wall) return false;
-      const b = itemRect(it);
-      return b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h;
-    }).map((it) => ({ it, dx: it.x - r.x, dy: it.y - r.y }));
-  }
-  moveRoom(r, x, y, inside) {
-    const { w, h } = this.draft;
-    x = clamp(x, 1, w - 1 - r.w); y = clamp(y, 1, h - 1 - r.h);
-    const dx = x - r.x, dy = y - r.y;
-    r.x = x; r.y = y;
-    for (const d of r.doors) { d.x += dx; d.y += dy; }
-    for (const c of inside) { c.it.x = x + c.dx; c.it.y = y + c.dy; }
-  }
-  moveItem(it, x, y) {
-    const k = ITEM_KINDS[it.kind], { w, h } = this.draft;
-    it.x = clamp(x, 1, w - 1 - k.w);
-    it.y = k.wall ? 0 : clamp(y, 1, h - 1 - k.h);
+    this.change(() => (this.sel.kind === 'room' ? moveRoom(this.draft, s, s.x + dx, s.y + dy, contents(this.draft, s)) : moveItem(this.draft, s, s.x + dx, s.y + dy)));
   }
 
   // ---- hit testing (tile coords) ----------------------------------------------------
-  itemAt(tx, ty) {
-    const layer = (it) => (ITEM_KINDS[it.kind].wall ? 2 : ITEM_KINDS[it.kind].floor ? 0 : 1);
-    let best = null;
-    for (const it of this.draft.items) {
-      const k = ITEM_KINDS[it.kind];
-      if (!k) continue;
-      const y = k.wall && ty < 0 ? 0 : ty; // wall items also catch clicks on the raised wall above row 0
-      if (inRect(itemRect(it), tx, y) && (!best || layer(it) >= layer(best))) best = it;
-    }
-    return best;
-  }
-  roomAt(tx, ty) {
-    let best = null;
-    for (const r of this.draft.rooms) if (inRect(r, tx, ty) && (!best || r.w * r.h < best.w * best.h)) best = r;
-    return best;
-  }
-  /** Walled rooms whose wall runs through this tile (not a corner, not the outer wall, not inside a room). */
-  wallRoomsAt(tx, ty) {
-    const { w, h } = this.draft;
-    if (tx <= 0 || ty <= 0 || tx >= w - 1 || ty >= h - 1 || this.roomAt(tx, ty)) return [];
-    return this.draft.rooms.filter((r) => {
-      if (!hasWalls(r)) return false;
-      const g = ringRect(r);
-      return inRect(g, tx, ty) && !((tx === g.x || tx === g.x + g.w - 1) && (ty === g.y || ty === g.y + g.h - 1));
-    });
-  }
   /** Corner handle of the selected room under the pointer (office px). */
   handleAt(px, py) {
     const r = this.sel?.kind === 'room' && this.selected();
@@ -192,7 +126,7 @@ export class Editor {
   /** Cycle a wall tile: wall → door → open passage → wall. A door already there belongs to its room. */
   cycleDoor(tx, ty) {
     const owner = this.draft.rooms.find((r) => r.doors.some((d) => d.x === tx && d.y === ty));
-    const cands = this.wallRoomsAt(tx, ty);
+    const cands = wallRoomsAt(this.draft, tx, ty);
     const room = owner || cands.find((r) => r.id === this.sel?.id) || cands[0];
     if (!room) return false;
     this.change(() => {
@@ -202,18 +136,6 @@ export class Editor {
       else room.doors = room.doors.filter((x) => x !== d);
     });
     return true;
-  }
-
-  /** On the outer wall (or the raised part of the top wall above it), where the front door can go. */
-  onOuterWall(tx, ty) {
-    const { w, h } = this.draft;
-    return tx >= 0 && tx < w && ty >= -1 && ty < h && (tx === 0 || ty <= 0 || tx === w - 1 || ty === h - 1);
-  }
-  /** Keep the front door on its wall when the office is resized. */
-  fixFrontDoor(d) {
-    const side = d.door?.side || 'bottom', top = side === 'top' || side === 'bottom';
-    const at = top ? d.door?.x : d.door?.y, len = top ? d.w : d.h;
-    if (Number.isInteger(at) && Number.isInteger(len)) d.door = top ? { side, x: clamp(at, 1, len - 2) } : { side, y: clamp(at, 1, len - 2) };
   }
 
   // ---- canvas input -------------------------------------------------------------------
@@ -245,19 +167,19 @@ export class Editor {
     if (this.tool.startsWith('item:')) {
       const kind = this.tool.slice(5), k = ITEM_KINDS[kind];
       const it = { id: uid('i'), kind, x: tx, y: ty };
-      this.change(() => { this.moveItem(it, tx - Math.floor((k.w - 1) / 2), ty); this.draft.items.push(it); });
+      this.change(() => { moveItem(this.draft, it, tx - Math.floor((k.w - 1) / 2), ty); this.draft.items.push(it); });
       this.sel = { kind: 'item', id: it.id };
       this.syncPanel();
       return;
     }
     const corner = this.handleAt(px, py);
     if (corner) { const r = this.selected(); this.drag = { kind: 'resize', corner, r, orig: { x: r.x, y: r.y, w: r.w, h: r.h }, before }; return; }
-    const it = this.itemAt(tx, ty);
+    const it = itemAt(this.draft, tx, ty);
     if (it) { this.sel = { kind: 'item', id: it.id }; this.drag = { kind: 'item', it, dx: tx - it.x, dy: ty - it.y, before }; this.syncPanel(); return; }
-    if (this.onOuterWall(tx, ty)) { this.draft.door = doorFor(this.draft, tx, ty); this.drag = { kind: 'door', before }; this.refresh(); return; }
+    if (onOuterWall(this.draft, tx, ty)) { this.draft.door = doorFor(this.draft, tx, ty); this.drag = { kind: 'door', before }; this.refresh(); return; }
     if (this.cycleDoor(tx, ty)) return;
-    const r = this.roomAt(tx, ty);
-    if (r) { this.sel = { kind: 'room', id: r.id }; this.drag = { kind: 'room', r, x0: tx - r.x, y0: ty - r.y, inside: this.contents(r), before }; this.syncPanel(); return; }
+    const r = roomAt(this.draft, tx, ty);
+    if (r) { this.sel = { kind: 'room', id: r.id }; this.drag = { kind: 'room', r, x0: tx - r.x, y0: ty - r.y, inside: contents(this.draft, r), before }; this.syncPanel(); return; }
     this.sel = null;
     this.syncPanel();
   }
@@ -267,8 +189,8 @@ export class Editor {
     if (!d) { this.canvas.style.cursor = this.cursorAt(t); return; }
     if (d.kind === 'new-room') { d.x1 = t.tx; d.y1 = t.ty; return; }
     if (d.kind === 'door') this.draft.door = doorFor(this.draft, t.tx, t.ty);
-    else if (d.kind === 'item') this.moveItem(d.it, t.tx - d.dx, t.ty - d.dy);
-    else if (d.kind === 'room') this.moveRoom(d.r, t.tx - d.x0, t.ty - d.y0, d.inside);
+    else if (d.kind === 'item') moveItem(this.draft, d.it, t.tx - d.dx, t.ty - d.dy);
+    else if (d.kind === 'room') moveRoom(this.draft, d.r, t.tx - d.x0, t.ty - d.y0, d.inside);
     else if (d.kind === 'resize') {
       const o = d.orig, { w, h } = this.draft;
       // the opposite corner stays put; the dragged one snaps to the nearest tile edge
@@ -287,32 +209,25 @@ export class Editor {
     if (!d) return;
     if (d.kind === 'new-room') {
       const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
-      const r = { id: uid('r'), type: d.type, name: this.roomName(d.type), x, y, w: Math.abs(d.x1 - d.x0) + 1, h: Math.abs(d.y1 - d.y0) + 1, doors: [] };
+      const r = { id: uid('r'), type: d.type, name: roomName(this.draft, d.type), x, y, w: Math.abs(d.x1 - d.x0) + 1, h: Math.abs(d.y1 - d.y0) + 1, doors: [] };
       if (r.w < 2 || r.h < 2) { this.msg('방은 2×2 칸 이상으로 끌어서 그려주세요.', 'err'); return; }
-      this.change((dr) => { this.fixDoors(r); dr.rooms.push(r); });
+      this.change((dr) => { fixDoors(this.draft, r); dr.rooms.push(r); });
       this.sel = { kind: 'room', id: r.id };
       this.setTool('select');
       return;
     }
-    if (d.kind === 'resize') this.fixDoors(d.r);
+    if (d.kind === 'resize') fixDoors(this.draft, d.r);
     if (JSON.stringify(this.draft) !== d.before) { this.undo.push(d.before); if (this.undo.length > UNDO_MAX) this.undo.shift(); }
     this.refresh();
   }
   cursorAt(t) {
     if (this.tool !== 'select') return 'crosshair';
     if (this.handleAt(t.px, t.py)) return 'nwse-resize';
-    if (this.itemAt(t.tx, t.ty)) return 'move';
-    if (this.onOuterWall(t.tx, t.ty)) return this.world.view.geo.door.x === t.tx && this.world.view.geo.door.y === Math.max(0, t.ty) ? 'grab' : 'pointer';
-    if (this.wallRoomsAt(t.tx, t.ty).length || this.draft.rooms.some((r) => r.doors.some((d) => d.x === t.tx && d.y === t.ty))) return 'pointer';
-    if (this.roomAt(t.tx, t.ty)) return 'move';
+    if (itemAt(this.draft, t.tx, t.ty)) return 'move';
+    if (onOuterWall(this.draft, t.tx, t.ty)) return this.world.view.geo.door.x === t.tx && this.world.view.geo.door.y === Math.max(0, t.ty) ? 'grab' : 'pointer';
+    if (wallRoomsAt(this.draft, t.tx, t.ty).length || this.draft.rooms.some((r) => r.doors.some((d) => d.x === t.tx && d.y === t.ty))) return 'pointer';
+    if (roomAt(this.draft, t.tx, t.ty)) return 'move';
     return 'default';
-  }
-  roomName(type) {
-    const label = ROOM_TYPES[type].label;
-    if (type !== 'meeting') return label;
-    const used = new Set(this.draft.rooms.map((r) => r.name));
-    for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') if (!used.has(`${label} ${c}`)) return `${label} ${c}`;
-    return label;
   }
 
   // ---- overlay -------------------------------------------------------------------------
@@ -347,7 +262,7 @@ export class Editor {
     ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2 * px;
     ctx.strokeRect(geo.door.x * TILE + px, geo.door.y * TILE + px, TILE - 2 * px, TILE - 2 * px);
     const h = this.hover;
-    if (h && (!this.drag || this.drag.kind === 'door') && this.tool === 'select' && this.onOuterWall(h.tx, h.ty) && !this.itemAt(h.tx, h.ty)) {
+    if (h && (!this.drag || this.drag.kind === 'door') && this.tool === 'select' && onOuterWall(this.draft, h.tx, h.ty) && !itemAt(this.draft, h.tx, h.ty)) {
       const g = doorTiles({ ...d, door: doorFor(d, h.tx, h.ty) }).door;
       ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(g.x * TILE, g.y * TILE, TILE, TILE);
     } else if (h && !this.drag) {
@@ -355,9 +270,9 @@ export class Editor {
         const k = ITEM_KINDS[this.tool.slice(5)], x = clamp(h.tx - Math.floor((k.w - 1) / 2), 1, d.w - 1 - k.w), y = k.wall ? 0 : clamp(h.ty, 1, d.h - 1 - k.h);
         ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(x * TILE, (k.wall ? -1 : y) * TILE, k.w * TILE, (k.wall ? 2 : k.h) * TILE);
       } else if (this.tool === 'select') {
-        const hi = this.itemAt(h.tx, h.ty);
+        const hi = itemAt(this.draft, h.tx, h.ty);
         if (hi && hi !== it) { const b = itemRect(hi); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = px; ctx.strokeRect(b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE); }
-        else if (!hi && (this.wallRoomsAt(h.tx, h.ty).length || geo.isDoor(h.tx, h.ty))) { ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2 * px; ctx.strokeRect(h.tx * TILE + px, h.ty * TILE + px, TILE - 2 * px, TILE - 2 * px); }
+        else if (!hi && (wallRoomsAt(this.draft, h.tx, h.ty).length || geo.isDoor(h.tx, h.ty))) { ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 2 * px; ctx.strokeRect(h.tx * TILE + px, h.ty * TILE + px, TILE - 2 * px, TILE - 2 * px); }
       } else {
         ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(h.tx * TILE, h.ty * TILE, TILE, TILE);
       }
@@ -399,13 +314,13 @@ export class Editor {
       const v = Number($(id).value);
       this.change((d) => {
         if (key === 'door') d.door = d.door?.side === 'left' || d.door?.side === 'right' ? { side: d.door.side, y: v } : { side: d.door?.side || 'bottom', x: v };
-        else { d[key] = v; this.fixFrontDoor(d); }
+        else { d[key] = v; fixFrontDoor(d); }
       });
     });
     $('ed-door-side').addEventListener('change', () => this.change((d) => { // same spot along the new wall, as far as it goes
       const side = $('ed-door-side').value, at = d.door?.x ?? d.door?.y ?? 1;
       d.door = side === 'top' || side === 'bottom' ? { side, x: at } : { side, y: at };
-      this.fixFrontDoor(d);
+      fixFrontDoor(d);
     }));
     num('ed-w', 'w'); num('ed-h', 'h'); num('ed-door', 'door');
     $('ed-name').maxLength = MAX_NAME_CHARS; // office name, same limit the server checks
@@ -416,8 +331,8 @@ export class Editor {
       const f = ev.target.dataset.f;
       if (f === 'name') { s.name = ev.target.value; this.refresh(); return; } // typing: no undo step per key
       this.change(() => {
-        if (f === 'type') { s.type = ev.target.value; delete s.walls; delete s.glass; this.fixDoors(s); }
-        else if (f === 'walls') { if (ev.target.checked === (ROOM_TYPES[s.type].walls ?? true)) delete s.walls; else s.walls = ev.target.checked; this.fixDoors(s); }
+        if (f === 'type') { s.type = ev.target.value; delete s.walls; delete s.glass; fixDoors(this.draft, s); }
+        else if (f === 'walls') { if (ev.target.checked === (ROOM_TYPES[s.type].walls ?? true)) delete s.walls; else s.walls = ev.target.checked; fixDoors(this.draft, s); }
         else if (f === 'glass') { if (ev.target.checked === !!ROOM_TYPES[s.type].glass) delete s.glass; else s.glass = ev.target.checked; }
       });
     });
@@ -426,7 +341,7 @@ export class Editor {
     const allWalls = (on) => this.change((d) => {
       for (const r of d.rooms) {
         if (on === (ROOM_TYPES[r.type]?.walls ?? true)) delete r.walls; else r.walls = on;
-        this.fixDoors(r);
+        fixDoors(this.draft, r);
       }
     });
     $('ed-walls-on').addEventListener('click', () => allWalls(true));
