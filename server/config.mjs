@@ -17,6 +17,19 @@ export const SKINS_DIR = path.join(DATA_DIR, 'skins');   // uploaded sprite shee
 // Native launcher, not orca.cmd: cmd.exe would reparse prompt text. On Linux bare `orca` is the screen reader.
 export const ORCA_BIN = process.env.PAWGENTS_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
   || (process.platform === 'win32' ? 'orca.exe' : process.platform === 'linux' ? 'orca-ide' : 'orca');
+export const BACKEND = /^(orca|headless)$/.test(process.env.PAWGENTS_OFFICE_BACKEND || '') ? process.env.PAWGENTS_OFFICE_BACKEND : 'auto'; // which way to run sessions; auto offers whatever is available
+export const CLAUDE_BIN = process.env.PAWGENTS_OFFICE_CLAUDE_BIN || 'claude'; // headless backend's claude; override when it isn't on PATH
+export const RUN_DIR = path.join(DATA_DIR, 'run'); // per-session runner files, so a restarted server can reconnect
+export const BACKEND_PROBE_TTL_MS = 30_000; // how long a backend's availability is trusted before probing again
+export const HEADLESS_LAUNCH_WAIT_MS = 5000;  // a new runner must write its run file within this
+export const HEADLESS_EARLY_EXIT_MS = 1500;   // claude exiting this soon after start = bad login / flag, reported to the launcher
+export const RUNNER_CMD_TIMEOUT_MS = 3000;    // a runner answers every command at once; silence means it's wedged
+export const RUNNER_RECONNECT_MS = 2000;      // a dropped runner socket is retried every ... (while the runner pid lives)
+export const RUNNER_RECONNECT_TRIES = 5;
+export const HEADLESS_SETTINGS_FILE = path.join(DATA_DIR, 'headless-settings.json'); // --settings for headless claude (permission hook)
+// a parked permission request answers "no decision" after this: just under the hook's own 1800 s timeout (hooks/decision.mjs)
+export const PERMISSION_WAIT_MS = Number(process.env.PAWGENTS_OFFICE_PERMISSION_WAIT_MS) || 1_780_000; // env: dev override to test the timeout
+export const PERMISSION_HEARTBEAT_MS = 20_000; // a space every ... keeps the hook's fetch (undici: 300 s body timeout) alive
 export const MAX_PROMPT_CHARS = 20_000;
 export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (served on demand, not over SSE)
 

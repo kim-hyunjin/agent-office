@@ -61,6 +61,14 @@ export const toolText = (t) => `${t.name}${t.target ? ' · ' + t.target : ''}`;
 /** Thinking text recent enough to show (3 min); most callers also hide it once the session is idle. */
 export const thinkingFresh = (d, now) => !!d.lastThinking && now - d.lastThinkingAt < 3 * 60_000;
 
+/** A `claude -p` session behind the office's own runner (no Orca terminal). */
+export const isHeadless = (s) => s?.backend === 'headless';
+/** 퇴근 button tooltip: what a click will do to this session — busy means the forced close. */
+export function quitTitle(s, busy) {
+  if (isHeadless(s)) return busy ? '지금 턴을 끊고 프로세스를 종료합니다' : '입력을 닫아 세션을 끝냅니다 (SessionEnd 실행)';
+  return busy ? 'Orca 터미널 탭을 닫아 진행 중인 작업을 끊습니다' : '/exit 로 세션을 끝냅니다';
+}
+
 /** Turn ended, but background work (a shell, a monitor…) will wake the session again. */
 export function awaitingBg(s) { return s.state === 'idle' && (s.bgTasks?.length > 0 || !!s.awaitingShell); }
 

@@ -42,7 +42,8 @@ function apply(store, ev) {
   s.hookEvents++;
   s.lastEventAt = now;
   if (ev.permission_mode) s.permissionMode = ev.permission_mode;
-  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal) store.setTerminal(s, ev.orca_terminal);
+  // a headless session inherits no terminal; a stray handle (server started inside Orca) must not bind it to one
+  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal && s.backend !== 'headless') store.setTerminal(s, ev.orca_terminal);
 
   const agentId = ev.agent_id ? String(ev.agent_id) : null;
   const agent = agentId ? store.getOrCreateSubagent(s, agentId, { type: ev.agent_type }) : null;
@@ -98,7 +99,9 @@ function apply(store, ev) {
       const tool = String(ev.tool_name || '');
       const target = summarizeToolInput(tool, ev.tool_input);
       store.setState(s, 'waiting');
-      store.log(s, { ev: name, tool, target, text: 'permission' });
+      // headless sessions get each request twice (the plugin's async hook + our --decide one): log it once
+      const [last] = s.log.last(1);
+      if (!(last?.ev === name && last.tool === tool && last.target === target && last.text === 'permission' && now - last.t < 2000)) store.log(s, { ev: name, tool, target, text: 'permission' });
       break;
     }
     case 'Notification': {

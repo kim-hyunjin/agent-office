@@ -10,10 +10,66 @@ import { hasSkin, skinError } from './skins.mjs';
 import { applyHook } from './reducer.mjs';
 import { sendFile } from './static.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
-import { readBody, tooLarge, json, readJson, findSession, orcaError, isOwnHost } from './http.mjs';
+import { readBody, tooLarge, json, readJson, findSession, backendError, isOwnHost } from './http.mjs';
 import { fileDiff } from './diff.mjs';
 import { scheduleFileSync } from './files.mjs';
-import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
+import { listWorktrees, launchClaude, createWorktreeWithClaude } from './backends/orca.mjs';
+import { backends, forSession, orca, headless } from './backends/index.mjs';
+import { listGitWorktrees, repoRoots, worktreesAt, samePath, addWorktree } from './backends/git.mjs';
+import { PERMISSION_MODES } from './backends/protocol.mjs';
+
+const MODEL_RE = /^[\w.\-\[\]]{1,80}$/;
+const DETACHED = { error: '러너에 연결되지 않은 세션입니다. 잠시 후 다시 시도해주세요.', code: 'detached' };
+const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+
+/** Orca: one hire at a time (Orca creates checkouts / tabs sequentially anyway), a failure doesn't hide the rest. */
+async function launchOrca(res, { worktreeId, prompt, model, count, name }) {
+  if (!worktreeId) { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+  const base = (await listWorktrees()).find((w) => w.id === worktreeId);
+  if (!base) { json(res, 400, { error: '알 수 없는 워크트리입니다.' }); return; }
+  if (name !== null && !base.branch && !base.head) { json(res, 400, { error: '기준 워크트리의 브랜치를 알 수 없습니다.' }); return; }
+  const started = [], errors = [];
+  for (let i = 1; i <= count; i++) {
+    const wtName = name === null ? null : count > 1 ? `${name}-${i}` : name;
+    try {
+      if (wtName) await createWorktreeWithClaude({ base, name: wtName, prompt, model });
+      else await launchClaude({ worktreeId, prompt, model });
+      started.push(wtName || base.path);
+      console.log(`[web] launch claude in ${wtName ? `new worktree ${wtName} (from ${base.branch || base.head})` : base.path}${prompt ? ': ' + truncate(oneLine(prompt), 80) : ''}`);
+    } catch (e) { errors.push(`${wtName || `#${i}`}: ${e.message}`); }
+  }
+  if (!started.length) { json(res, 502, { error: errors.join('\n') }); return; }
+  json(res, 200, { ok: true, started: started.length, errors, sessions: [] });
+}
+
+/** Headless: worktrees (if any) are made one by one (git locks the repo), then every claude starts in parallel. */
+async function launchHeadless(store, res, { cwd, prompt, model, count, name, permissionMode }) {
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !isDir(cwd)) { json(res, 400, { error: '작업 폴더가 없습니다.' }); return; }
+  if (!PERMISSION_MODES.includes(permissionMode)) { json(res, 400, { error: '알 수 없는 권한 모드입니다.' }); return; }
+  const p = await headless.probe();
+  if (!p.available) { json(res, 409, { error: p.reason, code: 'headless_unavailable' }); return; }
+  const dirs = [], errors = [];
+  if (name === null) for (let i = 0; i < count; i++) dirs.push(cwd);
+  else {
+    // git's own list gives the main worktree's real-case path (repo keys are lowercased on Windows)
+    const ws = await worktreesAt(cwd), sel = ws.find((w) => samePath(w.path, cwd));
+    if (!sel) { json(res, 400, { error: '선택한 폴더가 git 워크트리가 아닙니다.' }); return; }
+    if (!sel.branch && !sel.head) { json(res, 400, { error: '기준 워크트리의 브랜치를 알 수 없습니다.' }); return; }
+    const repoRoot = ws[0]?.isMain ? ws[0].path : sel.path;
+    for (let i = 1; i <= count; i++) {
+      const wtName = count > 1 ? `${name}-${i}` : name;
+      try { dirs.push((await addWorktree({ repoRoot, name: wtName, base: sel.branch || sel.head })).path); } catch (e) { errors.push(`${wtName}: ${e.message}`); }
+    }
+  }
+  const results = await Promise.allSettled(dirs.map((dir) => headless.launch(store, { cwd: dir, prompt, model, permissionMode })));
+  const sessions = [];
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') { sessions.push(r.value?.id); console.log(`[web] launch claude (headless) in ${dirs[i]}${prompt ? ': ' + truncate(oneLine(prompt), 80) : ''}`); }
+    else errors.push(`${path.basename(dirs[i])}: ${r.reason?.message || r.reason}`);
+  });
+  if (!sessions.length) { json(res, 502, { error: errors.join('\n') || '시작하지 못했습니다.' }); return; }
+  json(res, 200, { ok: true, started: sessions.length, errors, sessions });
+}
 
 /** @returns {Array<[string, string | RegExp, (ctx: { req, res, url: URL, params: string[] }) => unknown]>} */
 export function makeRoutes({ store, sse }) {
@@ -24,6 +80,20 @@ export function makeRoutes({ store, sse }) {
     if (!data) return null;
     if (!office) { json(res, 404, { error: '사무실이 없습니다.' }); return null; }
     return { id, office, data };
+  };
+
+  // newWorktree: branch a fresh worktree off the selected one per hire, named name / name-1, name-2, …
+  const launch = async (res, data) => {
+    const backend = String(data.backend || ''), prompt = String(data.prompt ?? '').trim(), model = String(data.model || '').trim();
+    const count = Number(data.count ?? 1), name = data.newWorktree ? String(data.newWorktree.name || '').trim() : null;
+    if (!['orca', 'headless'].includes(backend) || prompt.length > MAX_PROMPT_CHARS || (model && !MODEL_RE.test(model))
+      || !Number.isInteger(count) || count < 1 || count > MAX_HIRES || (name !== null && !WORKTREE_NAME_RE.test(name))) {
+      json(res, 400, { error: '잘못된 요청입니다.' }); return;
+    }
+    try {
+      if (backend === 'orca') await launchOrca(res, { worktreeId: String(data.worktreeId || ''), prompt, model, count, name });
+      else await launchHeadless(store, res, { cwd: data.cwd, prompt, model, count, name, permissionMode: data.permissionMode == null || data.permissionMode === '' ? 'default' : String(data.permissionMode) });
+    } catch (e) { backendError(res, e); }
   };
 
   return [
@@ -39,10 +109,13 @@ export function makeRoutes({ store, sse }) {
         const who = ev.agent_id ? ` [agent ${String(ev.agent_id).slice(0, 8)}]` : '';
         console.log(`[hook] ${ev.hook_event_name}${t}  ${s.name} (${s.id.slice(0, 8)})${who} → ${ent?.state ?? s.state}`);
       }
+      // the --decide hook of a headless session: hold the request open until the browser answers (see parkPermission)
+      if (s && ev.await_decision === true && ev.hook_event_name === 'PermissionRequest' && !ev.agent_id && headless.has(s.id)) { headless.parkPermission(store, s, ev, res); return; }
       res.writeHead(204); res.end();
     }],
     ['GET', '/events', ({ req, res }) => sse.add(req, res, { type: 'snapshot', data: store.snapshot() })],
     ['GET', '/state', ({ res }) => json(res, 200, store.snapshot())],
+    ['GET', '/backends', async ({ res }) => json(res, 200, await backends())],
     ['GET', '/healthz', ({ res }) => { res.writeHead(200); res.end('ok'); }],
     ['GET', /^\/sessions\/([^/]+)\/log$/, ({ res, params: [id] }) => {
       const s = findSession(store, res, id);
@@ -79,31 +152,50 @@ export function makeRoutes({ store, sse }) {
       if (!s) return;
       const text = String(data.text ?? '').trim();
       if (!text || text.length > MAX_PROMPT_CHARS) { json(res, 400, { error: `지시는 1–${MAX_PROMPT_CHARS}자여야 합니다.` }); return; }
-      // A permission/question dialog would take our Enter as its default answer.
-      if (s.state === 'waiting') { json(res, 409, { error: '권한 승인·질문 응답을 기다리는 중입니다. 터미널에서 먼저 답해주세요.', code: 'waiting' }); return; }
+      const b = forSession(s);
+      if (!b) { json(res, 409, DETACHED); return; }
+      // Orca: a permission/question dialog would take our Enter as its default answer. Headless just queues the turn.
+      if (b === orca && s.state === 'waiting') { json(res, 409, { error: '권한 승인·질문 응답을 기다리는 중입니다. 터미널에서 먼저 답해주세요.', code: 'waiting' }); return; }
       try {
-        const r = await sendPrompt(store, s, text);
+        const r = await b.sendPrompt(store, s, text);
         console.log(`[web] prompt → ${s.name} (${s.id.slice(0, 8)}): ${truncate(oneLine(text), 80)}`);
         store.emitSession(s);
         json(res, 200, { ok: true, accepted: r?.accepted ?? true });
-      } catch (e) { orcaError(res, e); }
+      } catch (e) { backendError(res, e); }
     }],
     ['POST', /^\/sessions\/([^/]+)\/close$/, async ({ req, res, params: [id] }) => {
       const data = await readJson(req, res);
       if (!data) return;
       const s = findSession(store, res, id, { live: true, msg: '세션이 없거나 이미 종료되었습니다.' });
       if (!s) return;
-      const force = data.force === true;
+      const force = data.force === true, b = forSession(s);
+      if (!b) { json(res, 409, DETACHED); return; }
       // `/exit` is only safe at an idle prompt; the client re-asks with force otherwise.
       if (!force && s.state !== 'idle') { json(res, 409, { error: '작업 중이거나 응답 대기 중이라 /exit 를 보낼 수 없습니다. 강제 종료를 쓰세요.', code: 'busy' }); return; }
       try {
-        await closeSession(store, s, { force });
+        await b.closeSession(store, s, { force });
         console.log(`[web] close${force ? ' (force)' : ''} → ${s.name} (${s.id.slice(0, 8)})`);
         json(res, 200, { ok: true });
-      } catch (e) { orcaError(res, e); }
+      } catch (e) { backendError(res, e); }
     }],
-    ['GET', '/orca/worktrees', async ({ res }) => {
-      try { json(res, 200, { worktrees: await listWorktrees() }); } catch (e) { orcaError(res, e); }
+    ['POST', /^\/sessions\/([^/]+)\/permission$/, async ({ req, res, params: [id] }) => {
+      const data = await readJson(req, res);
+      if (!data) return;
+      if (typeof data.id !== 'string' || typeof data.allow !== 'boolean') { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+      const s = findSession(store, res, id, { live: true, msg: '세션이 없거나 종료되었습니다.' });
+      if (!s) return;
+      const p = s.pendingPermissions.find((x) => x.id === data.id);
+      if (!headless.decidePermission(store, s, data.id, data.allow)) { json(res, 409, { error: '이미 처리된 요청입니다.', code: 'stale' }); return; }
+      console.log(`[web] permission ${data.allow ? 'allow' : 'deny'} ${p?.tool || '?'} → ${s.name} (${s.id.slice(0, 8)})`);
+      json(res, 200, { ok: true });
+    }],
+    ['GET', '/worktrees', async ({ res, url }) => {
+      const backend = url.searchParams.get('backend') || (await backends()).default;
+      try {
+        if (backend === 'orca') json(res, 200, { worktrees: await listWorktrees() });
+        else if (backend === 'headless') json(res, 200, { worktrees: await listGitWorktrees(repoRoots(store)) });
+        else json(res, 400, { error: '알 수 없는 백엔드입니다.' });
+      } catch (e) { backendError(res, e); }
     }],
     ['POST', '/settings/together', async ({ req, res }) => {
       const data = await readJson(req, res);
@@ -177,37 +269,9 @@ export function makeRoutes({ store, sse }) {
       if (!store.removeSkin(id)) { json(res, 404, { error: '없는 스킨입니다.' }); return; }
       json(res, 200, { ok: true });
     }],
-    ['POST', '/orca/launch', async ({ req, res }) => {
+    ['POST', '/launch', async ({ req, res }) => {
       const data = await readJson(req, res);
-      if (!data) return;
-      const worktreeId = String(data.worktreeId || '');
-      const prompt = String(data.prompt ?? '').trim();
-      const model = String(data.model || '').trim();
-      const count = Number(data.count ?? 1);
-      // newWorktree: branch a fresh worktree off the selected one per hire, named name / name-1, name-2, …
-      const name = data.newWorktree ? String(data.newWorktree.name || '').trim() : null;
-      if (!worktreeId || prompt.length > MAX_PROMPT_CHARS || (model && !/^[\w.\-\[\]]{1,80}$/.test(model))
-        || !Number.isInteger(count) || count < 1 || count > MAX_HIRES || (name !== null && !WORKTREE_NAME_RE.test(name))) {
-        json(res, 400, { error: '잘못된 요청입니다.' }); return;
-      }
-      try {
-        const base = (await listWorktrees()).find((w) => w.id === worktreeId);
-        if (!base) { json(res, 400, { error: '알 수 없는 워크트리입니다.' }); return; }
-        if (name !== null && !base.branch && !base.head) { json(res, 400, { error: '기준 워크트리의 브랜치를 알 수 없습니다.' }); return; }
-        // one at a time: Orca creates checkouts / tabs sequentially anyway, and a failure shouldn't hide the rest
-        const started = [], errors = [];
-        for (let i = 1; i <= count; i++) {
-          const wtName = name === null ? null : count > 1 ? `${name}-${i}` : name;
-          try {
-            if (wtName) await createWorktreeWithClaude({ base, name: wtName, prompt, model });
-            else await launchClaude({ worktreeId, prompt, model });
-            started.push(wtName || base.path);
-            console.log(`[web] launch claude in ${wtName ? `new worktree ${wtName} (from ${base.branch || base.head})` : base.path}${prompt ? ': ' + truncate(oneLine(prompt), 80) : ''}`);
-          } catch (e) { errors.push(`${wtName || `#${i}`}: ${e.message}`); }
-        }
-        if (!started.length) { json(res, 502, { error: errors.join('\n') }); return; }
-        json(res, 200, { ok: true, started: started.length, errors });
-      } catch (e) { orcaError(res, e); }
+      if (data) await launch(res, data);
     }],
   ];
 }

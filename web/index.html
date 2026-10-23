@@ -12,7 +12,7 @@
   <div id="bar">
     <nav id="tabs" hidden></nav>
     <div id="tools">
-      <button type="button" id="t-new" class="primary" title="Orca 워크트리에서 새 Claude 세션을 띄웁니다">+ 새 직원</button>
+      <button type="button" id="t-new" class="primary" title="새 Claude 세션을 띄웁니다">+ 새 직원</button>
       <button type="button" id="t-edit" title="이 사무실의 방·가구·정문 배치를 바꿉니다">배치 편집</button>
       <span class="zoom" role="group" aria-label="확대·축소">
         <button type="button" id="t-zoom-out" title="축소">−</button>
@@ -27,8 +27,25 @@
 <dialog id="launcher">
   <form id="l-form" method="dialog">
     <h2>새 직원 채용</h2>
-    <label>워크트리
+    <fieldset id="l-backend" hidden>
+      <legend>실행 방식</legend>
+      <label class="check"><input type="radio" name="backend" value="orca"> Orca</label>
+      <label class="check"><input type="radio" name="backend" value="headless"> 직접 실행 (claude -p)</label>
+      <p id="l-backend-hint" class="dim"></p>
+    </fieldset>
+    <label id="l-worktree-row">워크트리
       <select id="l-worktree" required><option value="">불러오는 중…</option></select>
+    </label>
+    <label id="l-cwd-row" hidden>작업 폴더
+      <select id="l-cwd"><option value="">불러오는 중…</option></select>
+      <input id="l-cwd-custom" autocomplete="off" spellcheck="false" placeholder="C:\path\to\repo" hidden>
+    </label>
+    <label id="l-perm-row" hidden>권한 모드
+      <select id="l-perm">
+        <option value="default">기본 (사무실에서 승인)</option>
+        <option value="acceptEdits">편집 자동 승인</option>
+        <option value="auto">자동 (분류기 판단)</option>
+      </select>
     </label>
     <label class="check"><input type="checkbox" id="l-new"> 새 워크트리 만들기 <span class="dim" id="l-new-hint">(선택한 워크트리의 브랜치에서 분기)</span></label>
     <label id="l-name-row" hidden>새 워크트리 이름 <span class="dim">(브랜치 이름으로도 쓰여요)</span>
@@ -173,6 +190,7 @@
     <ul id="p-log"></ul>
   </div>
   <form id="p-compose">
+    <div id="p-perm" hidden></div>
     <textarea id="p-input" rows="2" placeholder="이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea>
     <div class="row">
       <span id="p-compose-msg" class="msg"></span>

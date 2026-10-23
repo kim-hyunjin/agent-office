@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { ORCA_BIN } from './config.mjs';
-import { isPidAlive } from './util.mjs';
+import { ORCA_BIN, BACKEND_PROBE_TTL_MS } from '../config.mjs';
+import { isPidAlive } from '../util.mjs';
 
 const orcaErr = (message, code) => Object.assign(new Error(message), { code });
 
@@ -17,6 +17,16 @@ function runOrca(args, { timeoutMs = 15_000 } = {}) {
         out?.error?.code || err?.code || 'orca_failed'));
     });
   });
+}
+
+let probed = null; // { at, result }: `orca worktree list` per hit would stall every /backends call
+/** Is the Orca CLI installed and its app reachable? Cached for BACKEND_PROBE_TTL_MS. */
+export async function probe() {
+  if (probed && Date.now() - probed.at < BACKEND_PROBE_TTL_MS) return probed.result;
+  let result;
+  try { await runOrca(['worktree', 'list'], { timeoutMs: 5000 }); result = { available: true }; } catch (e) { result = { available: false, reason: e.message }; }
+  probed = { at: Date.now(), result };
+  return result;
 }
 
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
