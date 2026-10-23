@@ -5,7 +5,8 @@ import {
 } from './config.mjs';
 import { Store, CAT_FAMILIES, BREED_KEY, DEFAULT_OFFICE_ID } from './store.mjs';
 import { DEFAULT_OFFICE, cloneOffice, normalize, validate } from '../web/layout.js';
-import { isName, MAX_NAME_CHARS, MAX_HIRES, WORKTREE_NAME_RE, MAX_SKIN_BYTES, MIN_CELL, MAX_CELL, isCell, skinGridError } from '../web/limits.js';
+import { isName, MAX_NAME_CHARS, MAX_HIRES, WORKTREE_NAME_RE, MIN_CELL, MAX_CELL, isCell } from '../web/limits.js';
+import { hasSkin, skinError } from './skins.mjs';
 import { applyHook } from './reducer.mjs';
 import { Sse } from './sse.mjs';
 import { serveStatic, sendFile } from './static.mjs';
@@ -60,16 +61,6 @@ async function readJson(req, res) {
   const data = safeJsonParse(body);
   if (!data || typeof data !== 'object') { json(res, 400, { error: 'bad json' }); return null; }
   return data;
-}
-
-// Sprite sheet grid rules live in web/limits.js (skinGridError), shared with the upload dialog.
-const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-/** Checks an uploaded sheet; returns an error message, or null when it's usable. */
-function skinError(png, cellW, cellH) {
-  if (!png.length) return 'PNG 파일이 비어 있습니다.';
-  if (png.length > MAX_SKIN_BYTES) return `파일이 너무 큽니다(최대 ${MAX_SKIN_BYTES / 1024}KB).`;
-  if (png.length < 24 || !png.subarray(0, 8).equals(PNG_SIG) || png.toString('latin1', 12, 16) !== 'IHDR') return 'PNG 파일이 아닙니다.';
-  return skinGridError(png.readUInt32BE(16), png.readUInt32BE(20), cellW, cellH);
 }
 
 const orcaError = (res, e) => json(res, e.code === 'terminal_not_found' || e.code === 'not_claude' ? 409 : 502, { error: e.message, code: e.code });
@@ -214,7 +205,7 @@ const server = http.createServer(async (req, res) => {
     }
     const sk = p.match(/^\/skins\/([a-z0-9]{10})(\.png|\/delete)$/);
     if (sk && req.method === 'GET' && sk[2] === '.png') {
-      const file = store.skins.some((k) => k.id === sk[1]) ? store.skinFile(sk[1]) : null;
+      const file = hasSkin(store.skins, sk[1]) ? store.skinFile(sk[1]) : null;
       if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
       // ids are never reused, so the image under one can be cached for good
       sendFile(res, file, null, { 'Content-Type': 'image/png', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'max-age=31536000, immutable' });
