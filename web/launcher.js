@@ -1,5 +1,7 @@
 // "새 직원" dialog: start a claude session in an Orca worktree via the server's /orca/launch.
 // Opened from the #t-new toolbar button.
+import { MAX_HIRES, WORKTREE_NAME_RE } from './limits.js';
+
 const dlg = document.getElementById('launcher');
 const form = document.getElementById('l-form');
 const sel = document.getElementById('l-worktree');
@@ -13,8 +15,7 @@ const nameRow = document.getElementById('l-name-row');
 const nameIn = document.getElementById('l-name');
 const countIn = document.getElementById('l-count');
 const countHint = document.getElementById('l-count-hint');
-const MAX_HIRES = 5; // keep in sync with server/index.mjs
-const NAME_RE = /^[A-Za-z0-9][\w.\-]{0,59}$/;
+countIn.max = MAX_HIRES; // the one copy of the limit: index.html leaves max off
 let worktrees = [];
 
 const LAST_KEY = 'pawgents-office:last-worktree';
@@ -92,7 +93,7 @@ form.addEventListener('submit', async (e) => {
   const count = Math.floor(Number(countIn.value));
   if (!(count >= 1 && count <= MAX_HIRES)) { setMsg(`인원은 1~${MAX_HIRES}명이에요.`, 'err'); return; }
   const name = nameIn.value.trim();
-  if (newWt.checked && !NAME_RE.test(name)) { setMsg('워크트리 이름은 영문·숫자·. _ - 만, 60자까지 쓸 수 있어요.', 'err'); return; }
+  if (newWt.checked && !WORKTREE_NAME_RE.test(name)) { setMsg('워크트리 이름은 영문·숫자·. _ - 만, 60자까지 쓸 수 있어요.', 'err'); return; }
   submit.disabled = true;
   setMsg(newWt.checked ? `워크트리를 만들고 ${count}명 채용하는 중… (조금 걸려요)` : `Orca에서 ${count}명 시작하는 중…`);
   try {

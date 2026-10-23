@@ -36,5 +36,4 @@ export const TRANSCRIPT_POLL_MS = 2_000;
 export const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 export const STALE_TOOL_MS = 60_000;
 export const MAX_BODY_BYTES = 1024 * 1024;
-export const MAX_SKIN_BYTES = 512 * 1024; // decoded PNG; its base64 still fits in MAX_BODY_BYTES
 export const SSE_HEARTBEAT_MS = 15_000;

@@ -6,6 +6,7 @@
 import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, ringRect, DOOR_SIDES, doorFor, doorTiles } from './layout.js';
 import { buildBackground, FLOOR } from './tilemap.js';
 import { esc } from './panel.js';
+import { MAX_NAME_CHARS } from './limits.js';
 
 const $ = (id) => document.getElementById(id);
 const uid = (p) => `${p}${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
@@ -406,6 +407,7 @@ export class Editor {
       this.fixFrontDoor(d);
     }));
     num('ed-w', 'w'); num('ed-h', 'h'); num('ed-door', 'door');
+    $('ed-name').maxLength = MAX_NAME_CHARS; // office name, same limit the server checks
     $('ed-name').addEventListener('input', () => { this.name = $('ed-name').value; this.syncPanel(); });
     $('ed-sel').addEventListener('input', (ev) => {
       const s = this.selected();
@@ -512,7 +514,7 @@ export class Editor {
       if (box.dataset.key !== key) {
         box.dataset.key = key;
         box.innerHTML = `<h3>선택한 방</h3>
-          <label>이름 <input data-f="name" maxlength="30"></label>
+          <label>이름 <input data-f="name" maxlength="${MAX_NAME_CHARS}"></label>
           <label>종류 <select data-f="type">${Object.entries(ROOM_TYPES).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('')}</select></label>
           <div class="checks"><label class="check"><input type="checkbox" data-f="walls"> 벽</label><label class="check"><input type="checkbox" data-f="glass"> 유리벽</label></div>
           <p class="dim doors"></p>

@@ -6,12 +6,12 @@ import {
   SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate, skinScale,
 } from './sprites.js';
 import { esc } from './panel.js';
+import { MAX_NAME_CHARS, MAX_SKIN_BYTES, MIN_CELL, MAX_CELL, isCell, skinGridError } from './limits.js';
 
 const dlg = document.getElementById('legend');
 const body = document.getElementById('lg-body');
 const MONITOR = { 'wide-gold': '금색 와이드 모니터', silver: '실버 모니터', normal: '일반 모니터', laptop: '노트북' };
 const ZOOM = 2;
-const MAX_SKIN_BYTES = 512 * 1024; // same limit as the server (config.mjs)
 
 document.getElementById('lg-close').addEventListener('click', () => dlg.close());
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
@@ -170,11 +170,11 @@ async function downloadTemplate() {
 
 /** A cell size the sheet divides into evenly, with a sensible row count; 16 if nothing fits. */
 function guessCell(w, h) {
-  return [16, 32, 24, 48, 64, 12, 8].find((c) => w % c === 0 && h % c === 0 && h / c >= 2 && h / c <= SKIN_ROWS.length && w / c <= 16) || 16;
+  return [16, 32, 24, 48, 64, 12, 8].find((c) => !skinGridError(w, h, c, c)) || 16;
 }
 
 async function pickFile(file) {
-  const name = file.name.replace(/\.png$/i, '').slice(0, 30) || '스킨';
+  const name = file.name.replace(/\.png$/i, '').slice(0, MAX_NAME_CHARS) || '스킨';
   try {
     if (file.size > MAX_SKIN_BYTES) throw new Error(`파일이 너무 큽니다(최대 ${MAX_SKIN_BYTES / 1024}KB).`);
     const bmp = await createImageBitmap(file);
@@ -187,15 +187,6 @@ async function pickFile(file) {
   refreshLegend();
 }
 
-/** What's wrong with the draft's grid, or null. Mirrors the server's checks so most mistakes show before uploading. */
-function gridError(d) {
-  const { width: w, height: h } = d.bmp;
-  if (w % d.cellW || h % d.cellH) return `이미지 크기(${w}×${h})가 칸 크기로 나누어떨어지지 않아요.`;
-  if (h / d.cellH < 2 || h / d.cellH > SKIN_ROWS.length) return `줄 수는 2–${SKIN_ROWS.length}줄이어야 해요(지금 ${h / d.cellH}줄).`;
-  if (w / d.cellW > 16) return `한 줄은 16칸까지예요(지금 ${w / d.cellW}칸).`;
-  return null;
-}
-
 function draftForm() {
   const d = draft;
   const box = document.createElement('div');
@@ -206,8 +197,8 @@ function draftForm() {
     return box;
   }
   box.innerHTML = `<div class="fields">
-      <label>이름 <input name="name" maxlength="30" value="${esc(d.name)}"></label>
-      <label>칸 <input name="cellW" type="number" min="4" max="64" value="${d.cellW}"> × <input name="cellH" type="number" min="4" max="64" value="${d.cellH}"> px</label>
+      <label>이름 <input name="name" maxlength="${MAX_NAME_CHARS}" value="${esc(d.name)}"></label>
+      <label>칸 <input name="cellW" type="number" min="${MIN_CELL}" max="${MAX_CELL}" value="${d.cellW}"> × <input name="cellH" type="number" min="${MIN_CELL}" max="${MAX_CELL}" value="${d.cellH}"> px</label>
       <span class="dim">${d.bmp.width}×${d.bmp.height}</span>
     </div>
     <ol class="frames"></ol>
@@ -218,7 +209,8 @@ function draftForm() {
   // preview: each row's frames as the office will cut them, or what's missing
   const preview = () => {
     d.name = nameIn.value; d.cellW = Number(wIn.value) || 0; d.cellH = Number(hIn.value) || 0;
-    let err = d.cellW >= 4 && d.cellH >= 4 && d.cellW <= 64 && d.cellH <= 64 ? gridError(d) : '칸 크기는 4–64px이어야 해요.';
+    // same grid checks as the server, so most mistakes show before uploading
+    let err = isCell(d.cellW) && isCell(d.cellH) ? skinGridError(d.bmp.width, d.bmp.height, d.cellW, d.cellH) : `칸 크기는 ${MIN_CELL}–${MAX_CELL}px이어야 해요.`;
     const rows = err ? {} : sliceSheet(d.bmp, d.cellW, d.cellH);
     if (!err && (!rows.idle || !rows.walk)) err = '첫 줄(앉아 있기)과 둘째 줄(걷기)에 그림이 있어야 해요.';
     frames.replaceChildren(...(err ? [] : SKIN_ROWS.map((anim) => {
