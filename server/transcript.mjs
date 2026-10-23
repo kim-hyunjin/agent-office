@@ -1,7 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { TRANSCRIPT_TAIL_BYTES } from './config.mjs';
-import { readTail, readFrom, safeJsonParse, cleanText, replyText, oneLine } from './util.mjs';
+import { readTail, readFrom, readSafe, safeJsonParse, cleanText, replyText, oneLine } from './util.mjs';
 
 /**
  * Tails session / subagent transcripts (append-only JSONL) to fill in
@@ -113,8 +112,4 @@ export class Tailer {
     }
     return changed;
   }
-}
-
-function readSafe(file) {
-  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
 }

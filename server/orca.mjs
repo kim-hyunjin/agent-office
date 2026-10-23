@@ -3,6 +3,8 @@ import path from 'node:path';
 import { ORCA_BIN } from './config.mjs';
 import { isPidAlive } from './util.mjs';
 
+const orcaErr = (message, code) => Object.assign(new Error(message), { code });
+
 /** Run `orca <args> --json` and return `result`. Throws Error(message) with `.code` on failure. */
 function runOrca(args, { timeoutMs = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -11,9 +13,8 @@ function runOrca(args, { timeoutMs = 15_000 } = {}) {
       let out = null;
       try { out = JSON.parse(stdout); } catch { /* not json */ }
       if (out?.ok) { resolve(out.result); return; }
-      const e = new Error(out?.error?.message || (err?.code === 'ENOENT' ? `orca CLI를 찾을 수 없습니다 (${ORCA_BIN})` : String(stderr || err?.message || 'orca failed').trim().slice(0, 300)));
-      e.code = out?.error?.code || err?.code || 'orca_failed';
-      reject(e);
+      reject(orcaErr(out?.error?.message || (err?.code === 'ENOENT' ? `orca CLI를 찾을 수 없습니다 (${ORCA_BIN})` : String(stderr || err?.message || 'orca failed').trim().slice(0, 300)),
+        out?.error?.code || err?.code || 'orca_failed'));
     });
   });
 }
@@ -66,17 +67,15 @@ async function resolveTerminal(store, s) {
     const twin = [...store.sessions.values()].some((o) => o !== s && !o.ended && normTitle(o.title) === title);
     if (hits.length === 1 && !twin) return hits[0];
   }
-  const e = new Error(cands.length
+  throw orcaErr(cands.length
     ? `이 세션의 Orca 터미널을 특정할 수 없습니다 (같은 worktree의 claude 탭 ${cands.length}개, 제목 일치 없음). 플러그인 설치 후 시작한 세션이면 프롬프트를 한 번 보내면 연결됩니다.`
-    : 'Orca 터미널에서 실행 중인 세션이 아닙니다.');
-  e.code = 'terminal_not_found';
-  throw e;
+    : 'Orca 터미널에서 실행 중인 세션이 아닙니다.', 'terminal_not_found');
 }
 
 export async function sendPrompt(store, s, text) {
   const t = await resolveTerminal(store, s);
   if (t.agentIdentity && t.agentIdentity !== 'claude') {
-    const e = new Error(`이 터미널은 claude가 아닌 ${t.agentIdentity}를 실행 중입니다.`); e.code = 'not_claude'; throw e;
+    throw orcaErr(`이 터미널은 claude가 아닌 ${t.agentIdentity}를 실행 중입니다.`, 'not_claude');
   }
   store.setTerminal(s, t.handle);
   return runOrca(['terminal', 'send', '--terminal', t.handle, '--text', text, '--enter']);
@@ -117,14 +116,19 @@ function launchedHandle(r, depth = 0) {
   return null;
 }
 
+/** Run an Orca launch and remember the tab it opened, so closing that session can close the tab too. */
+async function launchTracked(args, timeoutMs) {
+  const r = await runOrca(args, { timeoutMs });
+  const h = launchedHandle(r);
+  if (h) launched.add(h);
+  return r;
+}
+
 export async function launchClaude({ worktreeId, prompt, model }) {
   const args = ['agent', 'launch', '--agent', 'claude', '--worktree', `id:${worktreeId}`];
   if (prompt) args.push('--prompt', prompt);
   if (model) args.push('--model', model);
-  const r = await runOrca(args, { timeoutMs: 60_000 });
-  const h = launchedHandle(r);
-  if (h) launched.add(h);
-  return r;
+  return launchTracked(args, 60_000);
 }
 
 /**
@@ -136,8 +140,5 @@ export async function createWorktreeWithClaude({ base, name, prompt, model }) {
     '--parent-worktree', `worktree:${base.id}`, '--agent', 'claude'];
   if (prompt) args.push('--prompt', prompt);
   if (model) args.push('--model', model);
-  const r = await runOrca(args, { timeoutMs: 180_000 });
-  const h = launchedHandle(r);
-  if (h) launched.add(h);
-  return r;
+  return launchTracked(args, 180_000);
 }

@@ -24,6 +24,15 @@ export const BREED_KEY = /^([a-z]{2,24}|skin:[a-z0-9]{10})$/;
 export const DEFAULT_OFFICE_ID = 'default';
 const newOffice = (id, name, repos, layout = cloneOffice(DEFAULT_OFFICE)) => ({ id, name, repos, layout });
 
+/** Clock out a session or subagent (callers check `ended` first). */
+function markEnded(ent) {
+  ent.ended = true;
+  ent.endedAt = Date.now();
+  ent.state = 'offduty';
+  ent.stateSince = ent.endedAt;
+  ent.currentTool = null;
+}
+
 export class Store {
   constructor({ stateFile = STATE_FILE, skinsDir = SKINS_DIR } = {}) {
     this.sessions = new Map();
@@ -280,11 +289,7 @@ export class Store {
   }
   endSession(s, reason = 'ended') {
     if (s.ended) return;
-    s.ended = true;
-    s.endedAt = Date.now();
-    s.state = 'offduty';
-    s.stateSince = s.endedAt;
-    s.currentTool = null;
+    markEnded(s);
     for (const a of s.subagents.values()) this.endSubagent(a);
     this.log(s, { ev: 'SessionEnd', text: reason });
   }
@@ -325,11 +330,7 @@ export class Store {
   }
   endSubagent(a) {
     if (a.ended) return;
-    a.ended = true;
-    a.endedAt = Date.now();
-    a.state = 'offduty';
-    a.stateSince = a.endedAt;
-    a.currentTool = null;
+    markEnded(a);
   }
 
   setState(ent, state) {

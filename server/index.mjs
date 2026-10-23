@@ -7,7 +7,7 @@ import { Store, CAT_FAMILIES, BREED_KEY, DEFAULT_OFFICE_ID } from './store.mjs';
 import { DEFAULT_OFFICE, cloneOffice, normalize, validate } from '../web/layout.js';
 import { applyHook } from './reducer.mjs';
 import { Sse } from './sse.mjs';
-import { serveStatic } from './static.mjs';
+import { serveStatic, sendFile } from './static.mjs';
 import { pollRegistry } from './registry.mjs';
 import { Tailer } from './transcript.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
@@ -223,8 +223,7 @@ const server = http.createServer(async (req, res) => {
       const file = store.skins.some((k) => k.id === sk[1]) ? store.skinFile(sk[1]) : null;
       if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
       // ids are never reused, so the image under one can be cached for good
-      res.writeHead(200, { 'Content-Type': 'image/png', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'max-age=31536000, immutable' });
-      fs.createReadStream(file).pipe(res);
+      sendFile(res, file, null, { 'Content-Type': 'image/png', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'max-age=31536000, immutable' });
       return;
     }
     if (sk && req.method === 'POST' && sk[2] === '/delete') {

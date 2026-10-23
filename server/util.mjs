@@ -91,13 +91,18 @@ export function isPidAlive(pid) {
   catch (e) { return e.code === 'EPERM'; }
 }
 
-/** Read up to `bytes` from the end of a file. Returns { text, start, size }. */
-export function readTail(file, bytes) {
+export function readSafe(file) {
+  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+}
+
+/** Read bytes [startOf(size), size) of a file. Returns { text, start, size }, or null on error. */
+function readSlice(file, startOf) {
   let fd;
   try {
     const st = fs.statSync(file);
-    const start = Math.max(0, st.size - bytes);
-    const len = st.size - start;
+    const start = startOf(st.size);
+    const len = Math.max(0, st.size - start);
+    if (!len) return { text: '', start, size: st.size };
     const buf = Buffer.alloc(len);
     fd = fs.openSync(file, 'r');
     fs.readSync(fd, buf, 0, len, start);
@@ -109,23 +114,13 @@ export function readTail(file, bytes) {
   }
 }
 
+/** Read up to `bytes` from the end of a file. */
+export const readTail = (file, bytes) => readSlice(file, (n) => Math.max(0, n - bytes));
 /** Read bytes [from, size) of a file. */
-export function readFrom(file, from) {
-  let fd;
-  try {
-    const st = fs.statSync(file);
-    if (st.size <= from) return { text: '', size: st.size };
-    const len = st.size - from;
-    const buf = Buffer.alloc(len);
-    fd = fs.openSync(file, 'r');
-    fs.readSync(fd, buf, 0, len, from);
-    return { text: buf.toString('utf8'), size: st.size };
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
-}
+export const readFrom = (file, from) => readSlice(file, () => from);
+
+/** decodeURIComponent that answers null instead of throwing on a malformed escape. */
+export const decode = (s) => { try { return decodeURIComponent(s); } catch { return null; } };
 
 /** Claude Code encodes the project dir by replacing non-alphanumerics with '-'. */
 export function projectDirName(cwd) {
