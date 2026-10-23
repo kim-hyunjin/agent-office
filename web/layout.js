@@ -120,7 +120,7 @@ export function normalize(o) {
     items: Array.isArray(o.items) ? o.items.map((it) => pick(it, ['id', 'kind', 'x', 'y'])) : o.items,
   };
 }
-const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+export const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;
 const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
