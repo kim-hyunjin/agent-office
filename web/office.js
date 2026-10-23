@@ -1,6 +1,6 @@
 import { TILE, WALL_RISE, compile, DEFAULT_OFFICE } from './layout.js';
 import { buildBackground } from './tilemap.js';
-import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices, sprite } from './sprites.js';
+import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices, setSkins, onSkinLoad, sprite } from './sprites.js';
 import { step, clamp } from './anim.js';
 import { render, STATE_LABEL, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
@@ -454,9 +454,15 @@ async function setTogether(officeId, btn) {
   } catch (e) { btn.title = `실패: ${e.message}`; } finally { btn.disabled = false; }
 }
 let firstSnapshot = true;
-/** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
-function applyCatChoices(cats) {
+/** Breed or skin choices changed (snapshot or a 'settings' push): redraw every cat with its family's look. */
+function applyCatChoices({ cats, skins }) {
   setBreedChoices(cats);
+  setSkins(skins);
+  repaintCats();
+}
+// a skin finished loading: families picking it switch from their default breed to it
+onSkinLoad(() => repaintCats());
+function repaintCats() {
   for (const e of world.ents.values()) {
     const s = world.sessions.get(e.sessionId);
     if (!s) continue;
@@ -467,7 +473,7 @@ function applyCatChoices(cats) {
   refreshLegend();
 }
 function applySnapshot(snap) {
-  applyCatChoices(snap.cats);
+  applyCatChoices(snap);
   const seated = firstSnapshot;
   firstSnapshot = false;
   if (seated) for (const s of snap.sessions) world.sessions.set(s.id, s); // so the first office pick sees who works where
@@ -504,7 +510,7 @@ function connect() {
   es.addEventListener('snapshot', (ev) => { world.connected = true; applySnapshot(JSON.parse(ev.data)); });
   es.addEventListener('session', (ev) => upsertSession(JSON.parse(ev.data)));
   es.addEventListener('remove', (ev) => removeSession(JSON.parse(ev.data).id));
-  es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data).cats));
+  es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data)));
   es.addEventListener('offices', (ev) => { const d = JSON.parse(ev.data); setOffices(d.offices, d.together); });
   es.onopen = () => {
     world.connected = true;

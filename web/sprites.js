@@ -118,8 +118,14 @@ export const FAMILIES = {
 
 let chosen = {}; // family -> breed key, set by the user (server-persisted, see office.js)
 export function setBreedChoices(map) { chosen = { ...(map || {}) }; }
-/** The breed a model family's cats are drawn as: the user's pick if it's a known breed, else the default. */
-export function breedOf(fam) { return BREEDS[chosen[fam]] ? chosen[fam] : FAMILIES[fam].breed; }
+/** What the user picked for a family (a skin may still be loading), or the default breed. */
+export function choiceOf(fam) { return chosen[fam] || FAMILIES[fam].breed; }
+/** The breed a model family's cats are drawn as: the user's pick if it's a known breed or a loaded skin, else the default. */
+export function breedOf(fam) {
+  const k = chosen[fam];
+  return BREEDS[k] || skins.get(skinId(k))?.rows ? k : FAMILIES[fam].breed;
+}
+const skinId = (k) => (typeof k === 'string' && k.startsWith('skin:') ? k.slice(5) : null);
 
 export function familyOf(model) {
   const m = String(model || '').toLowerCase();
@@ -132,10 +138,12 @@ export function familyOf(model) {
 
 export function paletteFor(id, kind = 'employee', model = null) {
   const fam = familyOf(model), breed = breedOf(fam);
-  return breedPalette(breed, (hashStr(id) >>> 4) % BREEDS[breed].coats.length, kind, fam);
+  return breedPalette(breed, (hashStr(id) >>> 4) % (BREEDS[breed]?.coats.length || 1), kind, fam);
 }
-/** Palette for one specific coat variant of a breed. */
+/** Palette for one specific coat variant of a breed (a skin has just the one look). */
 export function breedPalette(breed, variant, kind = 'employee', fam = null) {
+  const sid = skinId(breed);
+  if (sid) return { fam, breed, skin: sid, variant: 0, kind };
   return { fam, breed, variant, kind, shape: BREEDS[breed].shape, ...BREEDS[breed].coats[variant], W: '#fdfdfd', L: '#c8d0d8', D: '#111' };
 }
 
@@ -289,6 +297,8 @@ const cache = new Map();
 
 /** Returns an OffscreenCanvas with the frame rasterized in the given palette. */
 export function sprite(pal, anim, frame) {
+  if (pal.skin) return skinSprite(pal, anim, frame);
+  anim = anim.replace(/^(back|side):/, ''); // a skin's pose name, drawn as a cat while the skin is gone
   const sheet = SHEETS[pal.kind] || E;
   const frames = sheet[anim] || sheet.idle;
   const key = `${pal.kind}|${pal.breed || pal.fam}|${pal.variant}|${anim}|${frame % frames.length}`;
@@ -315,14 +325,18 @@ const outlines = new WeakMap(); // sprite canvas -> Map(color -> canvas)
 
 export const OUTLINE_W = 2;
 
-/** An OUTLINE_W-px outline hugging the sprite's opaque pixels, on a canvas OUTLINE_W larger each way. */
+/**
+ * An OUTLINE_W-px outline (world pixels) hugging the sprite's opaque pixels, on a canvas that much larger each way.
+ * It shares the sprite's scale, so size both with spriteSize.
+ */
 export function outline(img, color) {
   let byColor = outlines.get(img);
   if (!byColor) outlines.set(img, byColor = new Map());
   let c = byColor.get(color);
   if (c) return c;
-  const r = OUTLINE_W;
+  const r = Math.max(1, Math.round(OUTLINE_W * (img.scale || 1)));
   c = new OffscreenCanvas(img.width + r * 2, img.height + r * 2);
+  c.scale = img.scale;
   const g = c.getContext('2d');
   // stamp the sprite at every offset within a rounded radius, so corners don't go square
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
@@ -338,17 +352,129 @@ export function outline(img, color) {
 
 const BACK = { idle: 'back', type: 'backType', read: 'back', write: 'back', wait: 'backWait', phone: 'backPhone' };
 /** The seen-from-behind variant of a seated animation, if the sheet has one (kittens only have back / backType). */
-export function backAnim(kind, anim) {
+export function backAnim(pal, anim) {
+  if (pal.skin) return `back:${anim}`;
   const b = BACK[anim];
-  const sheet = SHEETS[kind] || E;
+  const sheet = SHEETS[pal.kind] || E;
   return b && sheet[b] ? b : sheet.back ? 'back' : anim;
 }
 
 const SIDE = { idle: 'side', type: 'sideType', read: 'sideRead', write: 'side', wait: 'sideWait', phone: 'sidePhone' };
 /** The seated-in-profile variant (facing right) of an animation, if the sheet has one. */
-export function sideAnim(kind, anim) {
+export function sideAnim(pal, anim) {
+  if (pal.skin) return `side:${anim}`;
   const s = SIDE[anim];
-  return s && (SHEETS[kind] || E)[s] ? s : anim;
+  return s && (SHEETS[pal.kind] || E)[s] ? s : anim;
+}
+
+// ---- uploaded skins -------------------------------------------------------------------
+// A skin is a PNG sheet of equal cells: one row per animation in SKIN_ROWS order, frames left to right up to the
+// first empty (fully transparent) cell. Missing rows borrow a close pose (skinFrames). Frames are trimmed to one box
+// shared by the whole sheet, so feet and centers line up across poses, and drawn SKIN_H world pixels tall.
+export const SKIN_ROWS = ['idle', 'walk', 'type', 'read', 'wait', 'phone', 'write', 'sit', 'back', 'side', 'scratch', 'bat'];
+export const SKIN_ROW_LABEL = {
+  idle: '앉아 있기 (정면)', walk: '걷기 (오른쪽을 보고)', type: '타이핑', read: '책 읽기', wait: '손 들기', phone: '전화',
+  write: '화이트보드에 쓰기', sit: '엎드리기 (라운지·낮잠)', back: '뒷모습 (회의 테이블·책상)', side: '옆으로 앉기 (오른쪽을 보고)',
+  scratch: '스크래처 긁기', bat: '털실 치기',
+};
+const SKIN_FALLBACK = { type: 'idle', read: 'idle', wait: 'idle', phone: 'wait', write: 'wait', sit: 'idle', scratch: 'idle', back: 'idle', side: 'idle' };
+const SKIN_H = { employee: 12, assistant: 9 }; // an adult cat is at most 12 rows tall (scratching), a kitten about 9
+
+const skins = new Map(); // id -> { id, name, cellW, cellH, rows: { anim: [canvas] } once loaded, failed }
+let onSkinsLoaded = () => {};
+/** fn() runs whenever a skin finishes loading (or fails), so cats can switch over to it. */
+export function onSkinLoad(fn) { onSkinsLoaded = fn; }
+/** The server's skin list (snapshot or a 'settings' push): load new sheets, forget deleted ones. */
+export function setSkins(list) {
+  const keep = new Set();
+  for (const k of list || []) {
+    keep.add(k.id);
+    if (skins.has(k.id)) { skins.get(k.id).name = k.name; continue; }
+    const skin = { ...k, rows: null, failed: false };
+    skins.set(k.id, skin);
+    loadSkin(skin)
+      .then((rows) => { skin.rows = rows; }, (e) => { skin.failed = true; console.warn(`[skin] ${k.name}: ${e.message}`); })
+      .finally(() => { if (skins.get(k.id) === skin) onSkinsLoaded(); });
+  }
+  for (const id of skins.keys()) if (!keep.has(id)) skins.delete(id);
+}
+export function skinList() { return [...skins.values()]; }
+
+async function loadSkin(skin) {
+  const r = await fetch(`/skins/${skin.id}.png`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const rows = sliceSheet(await createImageBitmap(await r.blob()), skin.cellW, skin.cellH);
+  if (!rows.idle || !rows.walk) throw new Error('앉아 있기·걷기 줄이 비어 있습니다');
+  return rows;
+}
+
+/** Cut a sheet into { anim: [frame canvas] }; rows without frames are left out. */
+export function sliceSheet(bmp, cw, ch) {
+  const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  const px = g.getImageData(0, 0, bmp.width, bmp.height).data;
+  const cols = Math.floor(bmp.width / cw), nrows = Math.min(SKIN_ROWS.length, Math.floor(bmp.height / ch));
+  let x0 = cw, y0 = ch, x1 = -1, y1 = -1;
+  const cells = {};
+  for (let r = 0; r < nrows; r++) {
+    for (let col = 0; col < cols; col++) {
+      let any = false;
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+        if (!px[((r * ch + y) * bmp.width + col * cw + x) * 4 + 3]) continue;
+        any = true; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      if (!any) break;
+      (cells[SKIN_ROWS[r]] ||= []).push([col, r]);
+    }
+  }
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, rows = {};
+  for (const [anim, list] of Object.entries(cells)) {
+    rows[anim] = list.map(([col, r]) => {
+      const f = new OffscreenCanvas(w, h);
+      f.getContext('2d').drawImage(c, col * cw + x0, r * ch + y0, w, h, 0, 0, w, h);
+      return f;
+    });
+  }
+  return rows;
+}
+
+/** Frames for an animation; 'back:type' / 'side:read' are seats facing away / sideways (that row, else the pose itself). */
+function skinFrames(rows, anim) {
+  const m = /^(back|side):(.+)$/.exec(anim);
+  if (m) return rows[m[1]] || skinFrames(rows, m[2]);
+  if (rows[anim]) return rows[anim];
+  if (anim === 'bat') return [rows.idle[0], rows.wait?.[0] || rows.idle[1] || rows.idle[0]]; // paw down, paw up
+  return skinFrames(rows, SKIN_FALLBACK[anim] || 'idle');
+}
+
+function skinSprite(pal, anim, frame) {
+  const rows = skins.get(pal.skin)?.rows;
+  if (!rows) return sprite(breedPalette(FAMILIES[pal.fam || 'other'].breed, 0, pal.kind, pal.fam), anim, frame); // deleted, until re-picked
+  const frames = skinFrames(rows, anim), i = frame % frames.length;
+  const key = `skin|${pal.skin}|${pal.kind}|${anim}|${i}`;
+  let c = cache.get(key);
+  if (c) return c;
+  const src = frames[i];
+  c = new OffscreenCanvas(src.width, src.height);
+  c.getContext('2d').drawImage(src, 0, 0);
+  c.scale = src.height / (SKIN_H[pal.kind] || SKIN_H.employee); // sheet pixels per world pixel
+  cache.set(key, c);
+  return c;
+}
+
+/** World-pixel size of a sprite: skins are drawn scaled, built-in cats 1:1. */
+export function spriteSize(img) { const k = img.scale || 1; return { w: img.width / k, h: img.height / k }; }
+
+/** A sheet to draw over: the plain cat in every SKIN_ROWS pose, 16×16 cells, feet on each cell's bottom edge. */
+export function skinTemplate() {
+  const C = 16, pal = breedPalette('koshort', 0);
+  const cols = Math.max(...SKIN_ROWS.map((a) => E[a].length));
+  const c = new OffscreenCanvas(C * cols, C * SKIN_ROWS.length), g = c.getContext('2d');
+  SKIN_ROWS.forEach((anim, r) => E[anim].forEach((_, i) => {
+    const img = sprite(pal, anim, i);
+    g.drawImage(img, i * C + Math.floor((C - img.width) / 2), r * C + C - img.height);
+  }));
+  return c.convertToBlob({ type: 'image/png' });
 }
 
 /** The lobby's resident receptionist: a Bengal (gold, dark markings), a coat no model family uses. */

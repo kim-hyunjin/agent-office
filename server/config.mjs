@@ -11,6 +11,7 @@ export const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 export const DATA_DIR = process.env.PAWGENTS_OFFICE_DATA || path.join(os.homedir(), '.pawgents-office');
 export const STATE_FILE = path.join(DATA_DIR, 'state.json');
 export const PID_FILE = path.join(DATA_DIR, 'server.pid'); // written while listening; read by scripts/stop.mjs
+export const SKINS_DIR = path.join(DATA_DIR, 'skins');   // uploaded sprite sheets, <id>.png
 
 // Native launcher, not orca.cmd: cmd.exe would reparse prompt text. On Linux bare `orca` is the screen reader.
 export const ORCA_BIN = process.env.PAWGENTS_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
@@ -35,4 +36,5 @@ export const TRANSCRIPT_POLL_MS = 2_000;
 export const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 export const STALE_TOOL_MS = 60_000;
 export const MAX_BODY_BYTES = 1024 * 1024;
+export const MAX_SKIN_BYTES = 512 * 1024; // decoded PNG; its base64 still fits in MAX_BODY_BYTES
 export const SSE_HEARTBEAT_MS = 15_000;
