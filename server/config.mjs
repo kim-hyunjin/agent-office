@@ -17,6 +17,10 @@ export const SKINS_DIR = path.join(DATA_DIR, 'skins');   // uploaded sprite shee
 // Native launcher, not orca.cmd: cmd.exe would reparse prompt text. On Linux bare `orca` is the screen reader.
 export const ORCA_BIN = process.env.PAWGENTS_OFFICE_ORCA_BIN || process.env.ORCA_CLI_COMMAND
   || (process.platform === 'win32' ? 'orca.exe' : process.platform === 'linux' ? 'orca-ide' : 'orca');
+export const BACKEND = /^(orca|headless)$/.test(process.env.PAWGENTS_OFFICE_BACKEND || '') ? process.env.PAWGENTS_OFFICE_BACKEND : 'auto'; // which way to run sessions; auto offers whatever is available
+export const CLAUDE_BIN = process.env.PAWGENTS_OFFICE_CLAUDE_BIN || 'claude'; // headless backend's claude; override when it isn't on PATH
+export const RUN_DIR = path.join(DATA_DIR, 'run'); // per-session runner files, so a restarted server can reconnect
+export const BACKEND_PROBE_TTL_MS = 30_000; // how long a backend's availability is trusted before probing again
 export const MAX_PROMPT_CHARS = 20_000;
 export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (served on demand, not over SSE)
 

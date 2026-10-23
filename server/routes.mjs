@@ -13,7 +13,8 @@ import { safeJsonParse, truncate, oneLine } from './util.mjs';
 import { readBody, tooLarge, json, readJson, findSession, orcaError, isOwnHost } from './http.mjs';
 import { fileDiff } from './diff.mjs';
 import { scheduleFileSync } from './files.mjs';
-import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
+import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './backends/orca.mjs';
+import { backends } from './backends/index.mjs';
 
 /** @returns {Array<[string, string | RegExp, (ctx: { req, res, url: URL, params: string[] }) => unknown]>} */
 export function makeRoutes({ store, sse }) {
@@ -43,6 +44,7 @@ export function makeRoutes({ store, sse }) {
     }],
     ['GET', '/events', ({ req, res }) => sse.add(req, res, { type: 'snapshot', data: store.snapshot() })],
     ['GET', '/state', ({ res }) => json(res, 200, store.snapshot())],
+    ['GET', '/backends', async ({ res }) => json(res, 200, await backends())],
     ['GET', '/healthz', ({ res }) => { res.writeHead(200); res.end('ok'); }],
     ['GET', /^\/sessions\/([^/]+)\/log$/, ({ res, params: [id] }) => {
       const s = findSession(store, res, id);

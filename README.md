@@ -200,7 +200,8 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수,
 ```
 server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · http.mjs(요청 처리 공용) · skins.mjs(스킨 id·검증)
           reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별) · diff.mjs(git diff·status) · files.mjs(작업한 파일 동기화)
-          registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
+          registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail)
+          backends/index.mjs(백엔드 선택) · backends/orca.mjs(Orca CLI 연동)
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
 web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루프) · world.js(상태·자리·동선) · feed.js(티커) · viewport.js(배율·줌·리핏)
           render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
