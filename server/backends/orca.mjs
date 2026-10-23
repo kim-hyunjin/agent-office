@@ -154,6 +154,69 @@ export async function setMode(store, s, mode) {
   return { mode };
 }
 
+// ---- answering a permission dialog (a digit key, picked off the rendered dialog) ---------------------------------
+// The dialog lists numbered options ("1. Yes" … "3. No") and a digit selects one at once. The numbers and the list differ per
+// tool (2 or 3 options, "No, and tell Claude what to do differently"), so never send a fixed key: read the screen, find the
+// option whose label is exactly "Yes" (once, not "Yes, and always …") or starts with "No", and press that number.
+const OPTION_RE = /^\s*(?:❯\s*)?(\d{1,2})\.\s+(\S.*?)\s*$/;
+const DIALOG_FOOTER_RE = /^\s*(Esc to cancel|Enter to select)\b/i;
+
+/** The numbered option list ending the screen: { question, options: [{ n, label }] }, or null when there is none. */
+export function parseDialog(lines) {
+  let end = lines.length;
+  while (end > 0 && (!lines[end - 1].trim() || DIALOG_FOOTER_RE.test(lines[end - 1]))) end--;
+  const options = [];
+  let i = end - 1;
+  for (; i >= 0; i--) {
+    const m = OPTION_RE.exec(lines[i]);
+    if (m) { options.unshift({ n: Number(m[1]), label: m[2] }); if (m[1] === '1') { i--; break; } continue; }
+    if (/^\s{4,}\S/.test(lines[i])) continue; // a wrapped label or an option's description
+    break;
+  }
+  if (!options.length || options[0].n !== 1 || options.some((o, k) => o.n !== k + 1)) return null;
+  while (i >= 0 && !lines[i].trim()) i--;
+  return { question: i >= 0 ? lines[i].trim() : '', options };
+}
+
+/** The key that answers the dialog, or null when it has no plain Yes / No (unknown dialog: leave it to the user). */
+export function pickOption(dialog, allow) {
+  const o = dialog?.options.find((x) => allow ? x.label === 'Yes' : /^No\b/.test(x.label));
+  return o && o.n <= 9 ? o.n : null;
+}
+
+const dialogKey = (d) => d ? `${d.question}|${d.options.map((o) => o.label).join('|')}` : '';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function screenDialog(handle) {
+  const r = await runOrca(['terminal', 'read', '--terminal', handle, '--screen']);
+  return parseDialog(r?.terminal?.tail || []);
+}
+
+/**
+ * Allow or deny the permission dialog that session `s`'s terminal shows. `ref` is the `asking.at` of the card the user
+ * clicked: an answer for a request that has since changed is refused rather than applied to the next one.
+ */
+export async function answerPermission(store, s, allow, ref) {
+  const a = s.asking;
+  if (s.state !== 'waiting' || !a || String(a.at) !== String(ref)) throw orcaErr('이미 처리되었거나 바뀐 요청입니다.', 'stale');
+  if (!a.tool || a.tool === 'AskUserQuestion') throw orcaErr('질문·선택 다이얼로그는 터미널에서 직접 답해주세요.', 'dialog_unknown');
+  const t = await resolveTerminal(store, s);
+  store.setTerminal(s, t.handle);
+  const dialog = await screenDialog(t.handle);
+  const n = pickOption(dialog, allow);
+  if (!n) throw orcaErr(`터미널 화면에서 '${allow ? 'Yes' : 'No'}' 선택지를 찾지 못했습니다. 터미널에서 직접 답해주세요.`, 'dialog_unknown');
+  await runOrca(['terminal', 'send', '--terminal', t.handle, '--text', String(n)]);
+  const sig = dialogKey(dialog);
+  for (const end = Date.now() + 3000; Date.now() < end;) {
+    await sleep(150);
+    if (dialogKey(await screenDialog(t.handle)) !== sig) { // gone, or the next call's dialog
+      store.log(s, { ev: 'Notification', text: `사무실에서 ${allow ? '허용' : '거부'}: ${a.tool}${a.target ? ' · ' + a.target : ''}` });
+      return { allowed: allow };
+    }
+  }
+  throw orcaErr('키를 보냈지만 다이얼로그가 닫히지 않았습니다. 터미널을 확인해주세요.', 'dialog_unknown');
+}
+
 const launched = new Set(); // terminal handles opened by launchClaude (this server run)
 
 function closeAfterExit(s, handle) {
