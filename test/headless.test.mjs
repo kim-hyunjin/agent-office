@@ -317,3 +317,20 @@ test('send.mjs --decide: prints the office decision, nothing when there is none'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('defaultModel: ANTHROPIC_MODEL, then local, project and user settings', async () => {
+  const { defaultModel } = await import('../server/backends/headless.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pawgents-model-'));
+  const user = path.join(tmp, 'user'), proj = path.join(tmp, 'proj');
+  fs.mkdirSync(user); fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
+  assert.equal(defaultModel(proj, {}, user), null); // nothing set: claude's account default, unknown until init
+  fs.writeFileSync(path.join(user, 'settings.json'), JSON.stringify({ model: 'opus' }));
+  assert.equal(defaultModel(proj, {}, user), 'opus');
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.json'), JSON.stringify({ model: 'sonnet' }));
+  assert.equal(defaultModel(proj, {}, user), 'sonnet');
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.local.json'), '{ not json');
+  assert.equal(defaultModel(proj, {}, user), 'sonnet'); // a broken file is skipped
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.local.json'), JSON.stringify({ model: 'haiku' }));
+  assert.equal(defaultModel(proj, {}, user), 'haiku');
+  assert.equal(defaultModel(proj, { ANTHROPIC_MODEL: 'claude-fable-5-1' }, user), 'claude-fable-5-1');
+});

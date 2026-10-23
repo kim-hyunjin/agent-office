@@ -7,7 +7,7 @@ import { spawn, spawnSync, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
-  PORT, DATA_DIR, RUN_DIR, PROJECTS_DIR, CLAUDE_BIN, BACKEND_PROBE_TTL_MS,
+  PORT, DATA_DIR, RUN_DIR, PROJECTS_DIR, CLAUDE_DIR, CLAUDE_BIN, BACKEND_PROBE_TTL_MS,
   HEADLESS_LAUNCH_WAIT_MS, HEADLESS_EARLY_EXIT_MS, RUNNER_CMD_TIMEOUT_MS, RUNNER_RECONNECT_MS, RUNNER_RECONNECT_TRIES,
   HEADLESS_SETTINGS_FILE, PERMISSION_WAIT_MS, PERMISSION_HEARTBEAT_MS,
 } from '../config.mjs';
@@ -78,9 +78,26 @@ export function stripClaudeEnv(env) {
 /** Env for the runner (and so claude and its hooks): our port and data dir, so the plugin hooks report to this server. */
 export const childEnv = (env = process.env) => ({ ...stripClaudeEnv(env), PAWGENTS_OFFICE_PORT: String(PORT), PAWGENTS_OFFICE_DATA: DATA_DIR });
 
+/**
+ * The model claude picks when no --model is given: ANTHROPIC_MODEL, else the `model` of the project's local, project
+ * and user settings (that order). null: claude's own account default, which only its init line reveals. stream-json
+ * claude sends that line with its first turn, so without this a session hired with no first prompt has no model (a
+ * '—' in the panel, and no cat family, so no skin) until it is given work.
+ */
+export function defaultModel(cwd, env = process.env, claudeDir = CLAUDE_DIR) {
+  if (env.ANTHROPIC_MODEL) return String(env.ANTHROPIC_MODEL);
+  const files = [...(cwd ? [path.join(cwd, '.claude', 'settings.local.json'), path.join(cwd, '.claude', 'settings.json')] : []), path.join(claudeDir, 'settings.json')];
+  for (const f of files) {
+    const m = safeJsonParse(readSafe(f))?.model;
+    if (typeof m === 'string' && m.trim()) return m.trim();
+  }
+  return null;
+}
+
 // ---- runner connection -------------------------------------------------------------------------------------------
 function attach(store, h) {
   const s = store.getOrCreateSession(h.sid, { cwd: h.cwd, pid: h.claudePid, model: h.model, startedAt: h.startedAt, backend: 'headless', permissionMode: h.permissionMode });
+  s.model ||= h.model || defaultModel(h.cwd); // provisional: claude's init line replaces it with the exact model id
   store.setBackend(s, 'headless'); // registry or a hook may have created it first
   if (h.claudePid && !s.pid) s.pid = h.claudePid;
   s.transcriptPath ||= path.join(PROJECTS_DIR, projectDirName(h.cwd), `${h.sid}.jsonl`);
@@ -129,7 +146,7 @@ function connect(store, sid, info, { onExit } = {}) {
       if (m.type === 'event') {
         if (m.kind === 'stderr') { r.lastStderr = typeof m.line === 'string' ? m.line : r.lastStderr; return; }
         if (!s || s.ended) return;
-        if (m.kind === 'init' && m.model && !s.model) s.model = m.model;
+        if (m.kind === 'init' && m.model) s.model = m.model; // exact id, over defaultModel's guess
         else if (m.kind === 'mode') { if (s.permissionMode === m.mode) return; s.permissionMode = m.mode; }
         else if (m.kind === 'result' && m.isError) {
           store.log(s, { ev: 'Notification', text: `오류: ${m.subtype || 'error'}` });
