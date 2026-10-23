@@ -109,6 +109,8 @@ export function makeRoutes({ store, sse }) {
         const who = ev.agent_id ? ` [agent ${String(ev.agent_id).slice(0, 8)}]` : '';
         console.log(`[hook] ${ev.hook_event_name}${t}  ${s.name} (${s.id.slice(0, 8)})${who} → ${ent?.state ?? s.state}`);
       }
+      // the --decide hook of a headless session: hold the request open until the browser answers (see parkPermission)
+      if (s && ev.await_decision === true && ev.hook_event_name === 'PermissionRequest' && !ev.agent_id && headless.has(s.id)) { headless.parkPermission(store, s, ev, res); return; }
       res.writeHead(204); res.end();
     }],
     ['GET', '/events', ({ req, res }) => sse.add(req, res, { type: 'snapshot', data: store.snapshot() })],
@@ -175,6 +177,17 @@ export function makeRoutes({ store, sse }) {
         console.log(`[web] close${force ? ' (force)' : ''} → ${s.name} (${s.id.slice(0, 8)})`);
         json(res, 200, { ok: true });
       } catch (e) { backendError(res, e); }
+    }],
+    ['POST', /^\/sessions\/([^/]+)\/permission$/, async ({ req, res, params: [id] }) => {
+      const data = await readJson(req, res);
+      if (!data) return;
+      if (typeof data.id !== 'string' || typeof data.allow !== 'boolean') { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+      const s = findSession(store, res, id, { live: true, msg: '세션이 없거나 종료되었습니다.' });
+      if (!s) return;
+      const p = s.pendingPermissions.find((x) => x.id === data.id);
+      if (!headless.decidePermission(store, s, data.id, data.allow)) { json(res, 409, { error: '이미 처리된 요청입니다.', code: 'stale' }); return; }
+      console.log(`[web] permission ${data.allow ? 'allow' : 'deny'} ${p?.tool || '?'} → ${s.name} (${s.id.slice(0, 8)})`);
+      json(res, 200, { ok: true });
     }],
     ['GET', '/worktrees', async ({ res, url }) => {
       const backend = url.searchParams.get('backend') || (await backends()).default;

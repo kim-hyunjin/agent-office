@@ -27,6 +27,9 @@ export const RUNNER_CMD_TIMEOUT_MS = 3000;    // a runner answers every command 
 export const RUNNER_RECONNECT_MS = 2000;      // a dropped runner socket is retried every ... (while the runner pid lives)
 export const RUNNER_RECONNECT_TRIES = 5;
 export const HEADLESS_SETTINGS_FILE = path.join(DATA_DIR, 'headless-settings.json'); // --settings for headless claude (permission hook)
+// a parked permission request answers "no decision" after this: just under the hook's own 1800 s timeout (hooks/decision.mjs)
+export const PERMISSION_WAIT_MS = Number(process.env.PAWGENTS_OFFICE_PERMISSION_WAIT_MS) || 1_780_000; // env: dev override to test the timeout
+export const PERMISSION_HEARTBEAT_MS = 20_000; // a space every ... keeps the hook's fetch (undici: 300 s body timeout) alive
 export const MAX_PROMPT_CHARS = 20_000;
 export const MAX_REPLY_CHARS = 200_000; // full markdown reply kept per entity (served on demand, not over SSE)
 

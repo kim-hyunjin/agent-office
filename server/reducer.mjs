@@ -99,7 +99,9 @@ function apply(store, ev) {
       const tool = String(ev.tool_name || '');
       const target = summarizeToolInput(tool, ev.tool_input);
       store.setState(s, 'waiting');
-      store.log(s, { ev: name, tool, target, text: 'permission' });
+      // headless sessions get each request twice (the plugin's async hook + our --decide one): log it once
+      const [last] = s.log.last(1);
+      if (!(last?.ev === name && last.tool === tool && last.target === target && last.text === 'permission' && now - last.t < 2000)) store.log(s, { ev: name, tool, target, text: 'permission' });
       break;
     }
     case 'Notification': {

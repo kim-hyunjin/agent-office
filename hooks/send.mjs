@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 // Claude Code hook: forwards the stdin JSON payload to the pawgents-office server.
 // Prints NOTHING (hook stdout can be injected into Claude's context) and always exits 0.
+// Exception: with --decide (headless sessions only, see decision.mjs) a PermissionRequest waits for the office's answer
+// and prints the decision JSON; no answer prints nothing, which claude treats as "no decision" (denied).
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, BASE_URL, MAX_REPLY_CHARS } from '../server/config.mjs';
+import { DECIDE_FLAG, DECISION_TIMEOUT_S, decisionOutput } from './decision.mjs';
+import { ensureServer } from './ensure.mjs';
 
 const DEBUG = process.env.PAWGENTS_OFFICE_DEBUG === '1';
 
@@ -58,10 +62,36 @@ export async function readEvent() {
   return ev && typeof ev === 'object' ? ev : null;
 }
 
-export async function forward(ev) {
+const safeParse = (text) => { try { return JSON.parse(text); } catch { return null; } };
+
+/** Long-poll the server for the browser's allow/deny; prints the decision, or nothing (error, timeout, no answer). */
+async function awaitDecision(ev) {
+  // a dead office server would mean an instant deny; revive it first (it reconnects to this session's runner on boot)
+  if (process.env.PAWGENTS_OFFICE_AUTOSTART !== '0') await ensureServer();
+  ev.await_decision = true;
+  try {
+    const r = await fetch(`${BASE_URL}/hook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(ev),
+      signal: AbortSignal.timeout(DECISION_TIMEOUT_S * 1000 - 10_000), // give up before claude kills us
+    });
+    const d = safeParse((await r.text()).trim()); // the body is padded with heartbeat spaces
+    if (d?.decision === 'allow' || d?.decision === 'deny') {
+      const out = JSON.stringify(decisionOutput(d.decision === 'allow', typeof d.message === 'string' && d.message ? d.message : undefined));
+      await new Promise((resolve) => process.stdout.write(out, resolve)); // flushed before process.exit (pipes are async on macOS)
+      log(`decide: ${d.decision} ${ev.tool_name || ''}`);
+    } else log(`decide: none ${ev.tool_name || ''}`);
+  } catch (e) {
+    log(`decide: none (${e.message})`);
+  }
+}
+
+export async function forward(ev, { decide = false } = {}) {
   shrink(ev);
   // Set by Orca in its managed terminals; lets the office type into this session.
   if (process.env.ORCA_TERMINAL_HANDLE) ev.orca_terminal = process.env.ORCA_TERMINAL_HANDLE;
+  if (decide && ev.hook_event_name === 'PermissionRequest') return awaitDecision(ev);
   try {
     await fetch(`${BASE_URL}/hook`, {
       method: 'POST',
@@ -76,5 +106,5 @@ export async function forward(ev) {
 }
 
 if (import.meta.main) {
-  readEvent().then((ev) => ev && forward(ev)).catch(() => {}).finally(() => process.exit(0));
+  readEvent().then((ev) => ev && forward(ev, { decide: process.argv.includes(DECIDE_FLAG) })).catch(() => {}).finally(() => process.exit(0));
 }

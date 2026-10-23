@@ -1,7 +1,7 @@
 import { FAMILIES, familyOf } from './sprites.js';
 import { openReply, refreshReply } from './reply.js';
 import { openDiff, refreshDiff } from './diff.js';
-import { api, post, closeSession } from './api.js';
+import { api, post, closeSession, decidePermission } from './api.js';
 import { esc, fmtTime, setMsg, ICON, EV_ICON, MODE_LABEL, BUSY, STATE_LABEL, STATE_COLOR, awaitingBg, bgSummary, toolText, thinkingFresh, isHeadless, quitTitle } from './ui.js';
 
 const GIT_LABEL = { M: '수정됨 (git)', A: '추가됨 (git)', D: '삭제됨 (git)', '?': '새 파일 (아직 git에 없음)', R: '이름 바뀜 (git)', C: '복사됨 (git)', U: '충돌 (git)' };
@@ -28,6 +28,11 @@ export class Panel {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
     });
     el.querySelector('#p-compose').addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
+    this.permEl = el.querySelector('#p-perm');
+    this.permEl.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-allow]');
+      if (b) this.decide(b.closest('.perm'), b.dataset.allow === '1');
+    });
     this.isOpen = false;
     this.quitBtn = el.querySelector('#p-quit');
     this.quitBtn.addEventListener('click', () => this.quit());
@@ -105,6 +110,33 @@ export class Panel {
     }
   }
 
+  /** Answer one permission card. It stays (buttons off) until the next session event drops it from pendingPermissions. */
+  async decide(card, allow) {
+    const id = this.id, btns = [...card.querySelectorAll('button')];
+    if (!id || btns.some((b) => b.disabled)) return;
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      await decidePermission(id, card.dataset.id, allow);
+    } catch (e) {
+      if (this.id === id) this.setComposeMsg(e.message, 'err');
+      btns.forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  /** One card per parked permission request; rebuilt only when the set changes (renderMeta runs every second). */
+  renderPerm(s) {
+    const list = s && !s.ended ? s.pendingPermissions || [] : [];
+    const key = `${s?.id}|${list.map((p) => p.id).join(',')}`;
+    if (key === this.permKey) return;
+    this.permKey = key;
+    this.permEl.innerHTML = list.map((p) => `<div class="perm" data-id="${esc(p.id)}">
+        <div class="hd">✋ <b>${esc(p.tool)}</b>${p.target ? ' · ' + esc(p.target) : ''}</div>
+        ${p.detail ? `<div class="detail">${esc(p.detail)}</div>` : ''}
+        <div class="row"><button type="button" class="primary" data-allow="1">허용</button><button type="button" data-allow="0">거부</button></div>
+      </div>`).join('');
+    this.permEl.hidden = !list.length;
+  }
+
   /**
    * End the session. First click arms, second click (within 4s) sends. Idle → `/exit` (clean
    * SessionEnd, tab stays); anything else → close the Orca terminal outright. Typing `/exit`
@@ -153,9 +185,12 @@ export class Panel {
     this.quitBtn.hidden = !!s.ended;
     // headless: no TUI dialog to answer by accident, so a prompt sent while waiting just queues as the next turn
     const off = !!s.ended, hl = isHeadless(s), waiting = s.state === 'waiting' && !hl;
+    this.renderPerm(s);
+    const asking = hl && s.state === 'waiting' && s.pendingPermissions?.length > 0;
     this.input.disabled = off;
     this.sendBtn.disabled = off || waiting || !!this.sending;
     this.input.placeholder = off ? '퇴근한 직원입니다.'
+      : asking ? '권한 요청에 먼저 답해주세요 (위 카드). 지시는 큐에 들어갑니다.'
       : hl ? '이 직원에게 지시… (작업 중이면 큐에 들어가요)'
       : waiting ? '권한 승인·질문 응답 대기 중 — 터미널에서 먼저 답해주세요. (써 두고 나중에 보낼 수 있어요)'
       : `이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)${s.orcaTerminal ? '' : '\nOrca 터미널 연결 전 — 보내면 자동으로 찾아봅니다.'}`;

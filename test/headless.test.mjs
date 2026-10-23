@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pipePath, runFile, encode, newFeed, feed, parseCommand, parseClaudeLine, buildClaudeArgs, versionAtLeast, userMessageLine, runnerArgv, parseRunnerArgv, MAX_LINE_BYTES } from '../server/backends/protocol.mjs';
 import { RUN_DIR, MAX_PROMPT_CHARS } from '../server/config.mjs';
@@ -160,4 +160,131 @@ test('backend errors map to HTTP statuses', async () => {
   const res = { writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } };
   backendError(res, Object.assign(new Error('gone'), { code: 'detached' }));
   assert.equal(res.status, 409); assert.deepEqual(res.body, { error: 'gone', code: 'detached' });
+});
+
+// ---- Step 5: permission requests answered from the office ---------------------------------------------------------
+test('decision hook: output shapes, headless settings are synchronous, the plugin copy stays async', async () => {
+  const { decisionOutput, headlessSettings, DECISION_TIMEOUT_S, DECIDE_FLAG } = await import('../hooks/decision.mjs');
+  assert.deepEqual(decisionOutput(true), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+  assert.deepEqual(decisionOutput(false).hookSpecificOutput.decision, { behavior: 'deny', message: '사용자가 사무실에서 거부했습니다.' });
+  assert.equal(decisionOutput(false, 'x').hookSpecificOutput.decision.message, 'x');
+  const h = headlessSettings('node send.mjs --decide').hooks.PermissionRequest[0].hooks[0];
+  assert.deepEqual(h, { type: 'command', command: 'node send.mjs --decide', timeout: 1800 });
+  assert.equal(DECISION_TIMEOUT_S, 1800); assert.equal(DECIDE_FLAG, '--decide');
+  assert.equal('async' in h, false); // an async hook can't decide
+  // Design: the plugin's hook can't decide (async), so interactive sessions never wait on the office; only headless
+  // claude gets the deciding copy, through --settings.
+  const plugin = JSON.parse(fs.readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'));
+  assert.equal(plugin.hooks.PermissionRequest[0].hooks[0].async, true);
+  assert.equal(plugin.hooks.PermissionRequest[0].hooks[0].command.includes(DECIDE_FLAG), false);
+});
+
+test('ensureSettingsFile writes the --decide hook command (into its own data dir)', async () => {
+  const { SEND_SCRIPT } = await import('../hooks/_common.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pawgents-settings-'));
+  try {
+    // a child process: config reads PAWGENTS_OFFICE_DATA at import, and the real data dir must stay untouched
+    const code = "const m = await import(process.argv[1]); const f = m.ensureSettingsFile(); m.ensureSettingsFile(); console.log(f);";
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', code, new URL('../server/backends/headless.mjs', import.meta.url).href], { env: { ...process.env, PAWGENTS_OFFICE_DATA: tmp }, encoding: 'utf8' }).trim();
+    assert.equal(out, path.join(tmp, 'headless-settings.json'));
+    const h = JSON.parse(fs.readFileSync(out, 'utf8')).hooks.PermissionRequest[0].hooks[0];
+    assert.equal(h.command, `"${process.execPath}" "${SEND_SCRIPT}" --decide`);
+    assert.equal(h.timeout, 1800);
+    assert.ok(buildClaudeArgs({ sid: randomUUID(), settingsFile: out }).includes(out)); // passes the argv validation
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+/** A store / session / response just big enough for parkPermission. */
+function permFixture() {
+  const logs = [], s = { id: randomUUID(), state: 'waiting', ended: false, pendingPermissions: [] };
+  const store = { log: (_s, e) => logs.push(e), setState: (x, st) => { x.state = st; }, emitSession: () => {} };
+  return { logs, s, store };
+}
+class FakeRes {
+  constructor() { this.listeners = {}; this.chunks = []; this.writableEnded = false; this.status = 0; }
+  on(ev, fn) { (this.listeners[ev] ??= []).push(fn); return this; }
+  emit(ev) { for (const fn of this.listeners[ev] ?? []) fn(); }
+  writeHead(status, headers) { this.status = status; this.headers = headers; }
+  flushHeaders() { this.flushed = true; }
+  write(c) { this.chunks.push(c); }
+  end(c) { if (c !== undefined) this.chunks.push(c); this.writableEnded = true; this.emit('close'); }
+  get body() { return this.chunks.join(''); }
+}
+const writeEv = (file) => ({ hook_event_name: 'PermissionRequest', tool_name: 'Write', tool_input: { file_path: `/tmp/${file}`, content: 'ok' } });
+
+test('parkPermission: allow, deny, stale, and two requests at once', async () => {
+  const { parkPermission, decidePermission } = await import('../server/backends/headless.mjs');
+  const { logs, s, store } = permFixture();
+  const a = new FakeRes(), b = new FakeRes();
+  parkPermission(store, s, writeEv('a.txt'), a);
+  parkPermission(store, s, writeEv('b.txt'), b);
+  assert.equal(a.status, 200); assert.ok(a.flushed); assert.equal(a.writableEnded, false);
+  assert.equal(s.pendingPermissions.length, 2);
+  const [pa, pb] = s.pendingPermissions;
+  assert.deepEqual({ tool: pa.tool, target: pa.target }, { tool: 'Write', target: 'a.txt' });
+  assert.match(pa.detail, /a\.txt/); assert.equal(typeof pa.at, 'number'); assert.equal(pa.id.length, 8);
+  assert.equal(decidePermission(store, s, pa.id, true), true);
+  assert.deepEqual(JSON.parse(a.body.trim()), { decision: 'allow' });
+  assert.equal(s.state, 'waiting'); // b is still asking
+  assert.equal(decidePermission(store, s, pa.id, false), false); // stale
+  assert.equal(decidePermission(store, s, pb.id, false), true);
+  assert.deepEqual(JSON.parse(b.body.trim()), { decision: 'deny' });
+  assert.equal(s.state, 'thinking'); assert.deepEqual(s.pendingPermissions, []);
+  assert.deepEqual(logs.map((l) => l.text), ['→ 허용', '→ 거부']);
+});
+
+test('parkPermission: heartbeat, no answer in time -> {} (claude denies), hook gone -> silent', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const { parkPermission } = await import('../server/backends/headless.mjs');
+  const { PERMISSION_WAIT_MS, PERMISSION_HEARTBEAT_MS } = await import('../server/config.mjs');
+  const { logs, s, store } = permFixture();
+  const res = new FakeRes();
+  parkPermission(store, s, writeEv('c.txt'), res);
+  t.mock.timers.tick(PERMISSION_HEARTBEAT_MS);
+  assert.equal(res.body, ' ');
+  t.mock.timers.tick(PERMISSION_WAIT_MS);
+  assert.equal(res.body.trim(), '{}');
+  assert.deepEqual(logs.map((l) => l.text), ['→ 응답 없음']);
+  assert.equal(s.state, 'thinking');
+  const gone = new FakeRes();
+  s.state = 'waiting';
+  parkPermission(store, s, writeEv('d.txt'), gone);
+  gone.emit('close'); // the hook was killed / the server is going away
+  assert.deepEqual(s.pendingPermissions, []); assert.equal(logs.length, 1);
+});
+
+test('send.mjs --decide: prints the office decision, nothing when there is none', async () => {
+  const http = await import('node:http');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pawgents-decide-'));
+  let answer = '{}', got = null;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => { b += c; }).on('end', () => { got = JSON.parse(b); res.writeHead(200); res.write(' '); res.end(answer); });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const run = (args) => new Promise((resolve) => {
+    const env = { ...process.env, PAWGENTS_OFFICE_PORT: String(srv.address().port), PAWGENTS_OFFICE_DATA: tmp, PAWGENTS_OFFICE_AUTOSTART: '0' };
+    const c = spawn(process.execPath, [path.resolve(import.meta.dirname, '../hooks/send.mjs'), ...args], { env });
+    let out = ''; c.stdout.on('data', (d) => { out += d; });
+    c.on('exit', (code) => resolve({ code, out }));
+    c.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: randomUUID(), tool_name: 'Bash', tool_input: { command: 'echo hi' }, permission_suggestions: [{}] }));
+  });
+  try {
+    answer = JSON.stringify({ decision: 'allow' });
+    let r = await run(['--decide']);
+    assert.equal(r.code, 0); assert.deepEqual(JSON.parse(r.out), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+    assert.equal(got.await_decision, true); assert.equal('permission_suggestions' in got, false);
+    answer = JSON.stringify({ decision: 'deny', message: 'no' });
+    r = await run(['--decide']);
+    assert.deepEqual(JSON.parse(r.out).hookSpecificOutput.decision, { behavior: 'deny', message: 'no' });
+    answer = '{}';
+    assert.equal((await run(['--decide'])).out, '');
+    answer = JSON.stringify({ decision: 'allow' });
+    r = await run([]); // the plugin's async copy: fire and forget, never a decision
+    assert.equal(r.out, ''); assert.equal(got.await_decision, undefined);
+  } finally {
+    srv.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

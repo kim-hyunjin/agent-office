@@ -9,9 +9,12 @@ import { fileURLToPath } from 'node:url';
 import {
   PORT, DATA_DIR, RUN_DIR, PROJECTS_DIR, CLAUDE_BIN, BACKEND_PROBE_TTL_MS,
   HEADLESS_LAUNCH_WAIT_MS, HEADLESS_EARLY_EXIT_MS, RUNNER_CMD_TIMEOUT_MS, RUNNER_RECONNECT_MS, RUNNER_RECONNECT_TRIES,
+  HEADLESS_SETTINGS_FILE, PERMISSION_WAIT_MS, PERMISSION_HEARTBEAT_MS,
 } from '../config.mjs';
 import { pipePath, runFile, encode, newFeed, feed, runnerArgv, parseRunnerArgv } from './protocol.mjs';
-import { isPidAlive, projectDirName, safeJsonParse, readSafe, truncate, oneLine } from '../util.mjs';
+import { isPidAlive, projectDirName, safeJsonParse, readSafe, truncate, oneLine, summarizeToolInput, detailForTool } from '../util.mjs';
+import { SEND_SCRIPT } from '../../hooks/_common.mjs';
+import { DECIDE_FLAG, headlessSettings } from '../../hooks/decision.mjs';
 
 const RUNNER_PATH = fileURLToPath(new URL('../headless-runner.mjs', import.meta.url));
 const NOT_FOUND = 'claude CLI를 찾을 수 없습니다 (PAWGENTS_OFFICE_CLAUDE_BIN 으로 경로를 지정할 수 있어요)';
@@ -20,8 +23,11 @@ const isWin = process.platform === 'win32';
 const err = (message, code) => Object.assign(new Error(message), { code });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** sid -> { sock, info, feedState, waiters: Map<cmdType, [{resolve, reject, timer}]>, pending: Map (Step 5: permission requests), retries, lastStderr, killing } */
+/** sid -> { sock, info, feedState, waiters: Map<cmdType, [{resolve, reject, timer}]>, pending: Map<reqId, {finish, tool, target}>, retries, lastStderr, killing } */
 export const runners = new Map();
+// Parked permission requests per session; kept apart from the runner entry so a dropped-and-reconnected socket keeps them.
+const parked = new Map();
+const parkedOf = (sid) => parked.get(sid) ?? parked.set(sid, new Map()).get(sid);
 let stopping = false; // shutdown(): sockets close on purpose, don't reconnect or end sessions
 
 // ---- claude binary -----------------------------------------------------------------------------------------------
@@ -105,7 +111,7 @@ function rejectAll(r, e) {
 /** Connect to a runner's socket; resolves with its hello (attached to the store unless claude is already gone). */
 function connect(store, sid, info, { onExit } = {}) {
   return new Promise((resolve, reject) => {
-    const r = { sock: null, info, feedState: newFeed(), waiters: new Map(), pending: runners.get(sid)?.pending ?? new Map(), retries: 0, lastStderr: null, killing: false };
+    const r = { sock: null, info, feedState: newFeed(), waiters: new Map(), pending: parkedOf(sid), retries: 0, lastStderr: null, killing: false };
     const sock = r.sock = net.connect({ path: pipePath(sid) });
     let helloed = false, gotExit = false;
     const helloTimer = setTimeout(() => { if (!helloed) { sock.destroy(); reject(err('runner did not say hello', 'ETIMEDOUT')); } }, RUNNER_CMD_TIMEOUT_MS);
@@ -127,7 +133,12 @@ function connect(store, sid, info, { onExit } = {}) {
         else if (m.kind === 'result' && m.isError) {
           store.log(s, { ev: 'Notification', text: `오류: ${m.subtype || 'error'}` });
           if (s.state !== 'idle') store.setState(s, 'idle'); // no Stop hook follows a failed turn
-        } else if (m.kind === 'denied') store.log(s, { ev: 'PermissionRequest', tool: m.tool || '?', text: '→ 거부됨(응답 없음)' });
+        } else if (m.kind === 'denied') {
+          // claude reports every denial; one the office just made (or timed out) is already logged by parkPermission
+          const [last] = s.log.last(1);
+          if (last?.ev === 'PermissionRequest' && last.tool === (m.tool || '?') && /^→ (거부|응답 없음)$/.test(last.text) && Date.now() - last.t < 5000) return;
+          store.log(s, { ev: 'PermissionRequest', tool: m.tool || '?', text: '→ 거부됨(응답 없음)' });
+        }
         else return;
         store.emitSession(s);
       } else if (m.type === 'exit') {
@@ -135,7 +146,7 @@ function connect(store, sid, info, { onExit } = {}) {
         if (runners.get(sid) === r) runners.delete(sid);
         rejectAll(r, err('claude가 종료되었습니다.', 'headless_exit'));
         const tail = Array.isArray(m.stderrTail) ? m.stderrTail : [];
-        // Step 5: finish r.pending permission requests here (deny), or their hooks hang until timeout
+        denyAll(sid, '세션이 종료되었습니다.'); // the hooks die with claude anyway; this clears the cards and logs it
         endIfLive(store, sid, r.killing ? 'killed' : m.code ? `claude 종료 (code ${m.code}): ${truncate(oneLine(tail.at(-1) || r.lastStderr || ''), 200)}` : 'process exited');
         onExit?.(m);
       } else if (m.type === 'ack') settle(r, m.for, (w) => m.ok ? w.resolve(m) : w.reject(err(m.error || 'runner refused', 'headless_exit')));
@@ -198,8 +209,7 @@ export async function launch(store, { cwd, prompt, model, permissionMode }) {
   const p = await probe();
   if (!p.available) throw err(p.reason, 'headless_unavailable');
   const sid = randomUUID();
-  // settingsFile: Step 5 (permission hook) fills this in via ensureSettingsFile()
-  const spec = { sid, cwd, model: model || null, permissionMode: permissionMode || 'default', settingsFile: null, claude: resolveClaude(), version: p.version };
+  const spec = { sid, cwd, model: model || null, permissionMode: permissionMode || 'default', settingsFile: ensureSettingsFile(), claude: resolveClaude(), version: p.version };
   parseRunnerArgv(runnerArgv(spec)); // fail here, with a stack, rather than in a detached runner nobody watches
   fs.mkdirSync(RUN_DIR, { recursive: true });
   const child = spawn(process.execPath, [RUNNER_PATH, ...runnerArgv(spec)], { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv(), cwd });
@@ -222,10 +232,65 @@ export const sendPrompt = (store, s, text) => command(s.id, { type: 'prompt', te
 /** Default: close claude's stdin (it finishes the turn, runs SessionEnd, exits). force: kill the process tree now. */
 export function closeSession(store, s, { force = false } = {}) {
   if (!force) return command(s.id, { type: 'close' });
-  // Step 5: deny every pending permission request first, or the turn stays blocked on the hook
+  denyAll(s.id, '사무실에서 강제 종료했습니다.'); // first, or the turn stays blocked on the hook
   const r = runners.get(s.id);
   if (r) r.killing = true;
   return command(s.id, { type: 'kill' });
+}
+
+// ---- permission requests (the --decide hook long-polls POST /hook) -------------------------------------------------
+const SETTINGS_COMMAND = `"${process.execPath}" "${SEND_SCRIPT}" ${DECIDE_FLAG}`;
+/** Write the --settings file headless claude gets (our synchronous PermissionRequest hook); rewritten if node or the repo moved. */
+export function ensureSettingsFile() {
+  const text = JSON.stringify(headlessSettings(SETTINGS_COMMAND), null, 2) + '\n';
+  if (readSafe(HEADLESS_SETTINGS_FILE) !== text) { fs.mkdirSync(path.dirname(HEADLESS_SETTINGS_FILE), { recursive: true }); fs.writeFileSync(HEADLESS_SETTINGS_FILE, text); }
+  return HEADLESS_SETTINGS_FILE;
+}
+
+const RESULT_TEXT = { allow: '→ 허용', deny: '→ 거부' };
+/**
+ * Hold the hook's request open until the browser answers (decidePermission), the wait runs out (no decision: claude
+ * denies), or the hook goes away. Headers go out at once and a space every PERMISSION_HEARTBEAT_MS, because undici
+ * (the hook's fetch) gives up on a silent response after 300 s.
+ */
+export function parkPermission(store, s, ev, res) {
+  const id = randomUUID().slice(0, 8), tool = String(ev.tool_name || ''), target = summarizeToolInput(tool, ev.tool_input), detail = truncate(detailForTool(tool, ev.tool_input), 200);
+  const pending = parkedOf(s.id);
+  s.pendingPermissions.push({ id, tool, target, detail, at: Date.now() });
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.flushHeaders();
+  let done = false;
+  const hb = setInterval(() => { if (!res.writableEnded) res.write(' '); }, PERMISSION_HEARTBEAT_MS);
+  const timer = setTimeout(() => finish(null), PERMISSION_WAIT_MS);
+  /** decision: 'allow' | 'deny' | null (no answer). silent: the hook is gone, nothing to tell anyone. */
+  function finish(decision, { silent = false, message } = {}) {
+    if (done) return;
+    done = true;
+    clearInterval(hb); clearTimeout(timer);
+    if (!res.writableEnded) res.end(decision ? JSON.stringify({ decision, ...(message ? { message } : {}) }) : '{}');
+    s.pendingPermissions = s.pendingPermissions.filter((p) => p.id !== id);
+    pending.delete(id);
+    if (!pending.size) parked.delete(s.id);
+    if (!silent) store.log(s, { ev: 'PermissionRequest', tool, target, text: RESULT_TEXT[decision] || '→ 응답 없음' });
+    if (!s.pendingPermissions.length && s.state === 'waiting' && !s.ended) store.setState(s, 'thinking');
+    store.emitSession(s);
+  }
+  res.on('close', () => finish(null, { silent: true }));
+  pending.set(id, { finish, tool, target });
+  store.emitSession(s);
+}
+
+/** The browser's answer to request reqId; false when it's already settled (answered, timed out, session gone). */
+export function decidePermission(store, s, reqId, allow) {
+  const p = parked.get(s.id)?.get(reqId);
+  if (!p) return false;
+  p.finish(allow ? 'allow' : 'deny');
+  return true;
+}
+
+/** Deny every parked request of a session (it's ending or being killed). */
+function denyAll(sid, message) {
+  for (const p of [...(parked.get(sid)?.values() ?? [])]) p.finish('deny', { message });
 }
 
 // ---- server lifecycle --------------------------------------------------------------------------------------------

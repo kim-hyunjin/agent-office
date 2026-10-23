@@ -310,6 +310,7 @@ export class Store {
   endSession(s, reason = 'ended') {
     if (s.ended) return;
     markEnded(s);
+    s.pendingPermissions = []; // nobody can answer them now (the backend settles the parked hooks)
     for (const a of s.subagents.values()) this.endSubagent(a);
     this.log(s, { ev: 'SessionEnd', text: reason });
   }
