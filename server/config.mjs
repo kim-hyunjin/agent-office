@@ -3,6 +3,7 @@ import path from 'node:path';
 
 export const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || process.env.PORT || 17777);
 export const HOST = '127.0.0.1';
+export const BASE_URL = `http://${HOST}:${PORT}`;
 
 export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 export const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');

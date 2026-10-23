@@ -2,12 +2,14 @@
 // Replays a fake Claude Code hook sequence against a running pawgents-office server,
 // so the office can be developed and demoed without a live claude session.
 //   node scripts/demo.mjs [--loop] [--speed 1] [--port 17777]
+import { PORT as DEFAULT_PORT, HOST } from '../server/config.mjs';
+
 const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const LOOP = args.includes('--loop');
 const SPEED = Number(flag('--speed', 1));
-const PORT = Number(flag('--port', process.env.PAWGENTS_OFFICE_PORT || 17777));
-const URL_ = `http://127.0.0.1:${PORT}/hook`;
+const PORT = Number(flag('--port', DEFAULT_PORT));
+const BASE = `http://${HOST}:${PORT}`; // not config's BASE_URL: --port may override
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms / SPEED));
 
@@ -22,7 +24,7 @@ async function send(ev) {
   if (ev.hook_event_name === 'SessionStart') active.set(ev.session_id, { session_id: ev.session_id, cwd: ev.cwd, transcript_path: ev.transcript_path, permission_mode: ev.permission_mode });
   if (ev.hook_event_name === 'SessionEnd') active.delete(ev.session_id);
   try {
-    await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ev) });
+    await fetch(`${BASE}/hook`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ev) });
     const t = ev.tool_name ? ` ${ev.tool_name}` : '';
     console.log(`${ev.session_id.padEnd(12)} ${ev.hook_event_name}${t}${ev.agent_id ? ` (agent ${ev.agent_id})` : ''}`);
   } catch (e) {
@@ -87,7 +89,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 // SessionEnd events; send those leftovers home before starting fresh ones.
 async function sweepLeftovers() {
   let snap;
-  try { snap = await (await fetch(`http://127.0.0.1:${PORT}/state`)).json(); } catch { return; }
+  try { snap = await (await fetch(`${BASE}/state`)).json(); } catch { return; }
   const stale = Object.values(snap.sessions || {}).filter((s) => /^demo-/.test(s.id) && !s.ended);
   if (!stale.length) return;
   console.log(`sending ${stale.length} leftover demo session(s) from an earlier run home`);

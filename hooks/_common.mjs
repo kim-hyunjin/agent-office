@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { CLAUDE_DIR } from '../server/config.mjs';
 
 export const EVENTS = [
   'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
@@ -8,7 +8,7 @@ export const EVENTS = [
 ];
 export const SEND_SCRIPT = path.resolve(import.meta.dirname, 'send.mjs');
 export const HOOK_COMMAND = `"${process.execPath}" "${SEND_SCRIPT}"`;
-export const SETTINGS_FILE = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
+export const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 
 /** True if this hook handler is ours (points at this repo's hooks/send.mjs). */
 export function isOurs(handler) {
@@ -23,7 +23,12 @@ export function readSettings() {
   catch (e) { throw new Error(`${SETTINGS_FILE} is not valid JSON (${e.message}). Fix it by hand first; nothing was changed.`); }
 }
 
-export function backupSettings() {
+/** Settings, or prints why they can't be read and exits 1 (nothing is changed). */
+export function loadSettingsOrExit() {
+  try { return readSettings(); } catch (e) { console.error(e.message); process.exit(1); }
+}
+
+function backupSettings() {
   if (!fs.existsSync(SETTINGS_FILE)) return null;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const bak = `${SETTINGS_FILE}.bak-${stamp}`;
@@ -31,7 +36,14 @@ export function backupSettings() {
   return bak;
 }
 
-export function writeSettings(settings) {
+function writeSettings(settings) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + '\n');
+}
+
+/** Backs up the current file, then writes `settings`. Returns the backup path (null if there was no file). */
+export function commitSettings(settings) {
+  const bak = backupSettings();
+  writeSettings(settings);
+  return bak;
 }

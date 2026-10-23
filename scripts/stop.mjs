@@ -2,14 +2,19 @@
 // Stops a background pawgents-office server (one started by the plugin hook or /pawgents-office:open).
 import fs from 'node:fs';
 import { PID_FILE, PORT } from '../server/config.mjs';
+import { isPidAlive } from '../server/util.mjs';
 
 let pid;
 try { pid = Number(fs.readFileSync(PID_FILE, 'utf8')); } catch { /* no pid file */ }
 if (!pid) { console.log(`pawgents-office is not running (no ${PID_FILE}).`); process.exit(0); }
+const dropPidFile = () => { try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ } };
+if (!isPidAlive(pid)) { console.log(`pawgents-office (pid ${pid}) was not running.`); dropPidFile(); process.exit(0); }
 try {
   process.kill(pid);
   console.log(`Stopped pawgents-office (pid ${pid}, port ${PORT}).`);
+  dropPidFile();
 } catch (e) {
-  console.log(e.code === 'ESRCH' ? `pawgents-office (pid ${pid}) was not running.` : `Could not stop pid ${pid}: ${e.message}`);
+  // Anything but ESRCH (e.g. EPERM) means the server may still be up: keep the pid file for a retry.
+  if (e.code === 'ESRCH') { console.log(`pawgents-office (pid ${pid}) was not running.`); dropPidFile(); }
+  else console.log(`Could not stop pid ${pid}: ${e.message}`);
 }
-try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }

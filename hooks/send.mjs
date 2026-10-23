@@ -2,18 +2,16 @@
 // Claude Code hook: forwards the stdin JSON payload to the pawgents-office server.
 // Prints NOTHING (hook stdout can be injected into Claude's context) and always exits 0.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { DATA_DIR, BASE_URL, MAX_REPLY_CHARS } from '../server/config.mjs';
 
-const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || 17777);
 const DEBUG = process.env.PAWGENTS_OFFICE_DEBUG === '1';
 
-function log(msg) {
+export function log(msg) {
   if (!DEBUG) return;
   try {
-    const dir = process.env.PAWGENTS_OFFICE_DATA || path.join(os.homedir(), '.pawgents-office');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'hook.log'), `${new Date().toISOString()} ${msg}\n`);
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(path.join(DATA_DIR, 'hook.log'), `${new Date().toISOString()} ${msg}\n`);
   } catch { /* ignore */ }
 }
 
@@ -33,7 +31,7 @@ function shrink(ev) {
     if (typeof ev[k] === 'string') ev[k] = clip(ev[k], 2000);
   }
   // Kept whole for the reply dialog; the server caps it (MAX_REPLY_CHARS) well under MAX_BODY_BYTES.
-  ev.last_assistant_message = clip(ev.last_assistant_message, 200_000);
+  ev.last_assistant_message = clip(ev.last_assistant_message, MAX_REPLY_CHARS);
   if (ev.tool_input && typeof ev.tool_input === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(ev.tool_input)) {
@@ -65,7 +63,7 @@ export async function forward(ev) {
   // Set by Orca in its managed terminals; lets the office type into this session.
   if (process.env.ORCA_TERMINAL_HANDLE) ev.orca_terminal = process.env.ORCA_TERMINAL_HANDLE;
   try {
-    await fetch(`http://127.0.0.1:${PORT}/hook`, {
+    await fetch(`${BASE_URL}/hook`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(ev),

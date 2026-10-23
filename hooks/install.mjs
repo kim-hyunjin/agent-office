@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // Registers pawgents-office hooks in ~/.claude/settings.json. Idempotent; backs up first.
 //   node hooks/install.mjs [--dry-run]
-import { EVENTS, HOOK_COMMAND, SETTINGS_FILE, isOurs, readSettings, backupSettings, writeSettings } from './_common.mjs';
+import { EVENTS, HOOK_COMMAND, SETTINGS_FILE, isOurs, loadSettingsOrExit, commitSettings } from './_common.mjs';
 
 const dryRun = process.argv.includes('--dry-run');
-let settings;
-try { settings = readSettings(); } catch (e) { console.error(e.message); process.exit(1); }
+const settings = loadSettingsOrExit();
 
 if (settings.hooks && (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) {
   console.error(`"hooks" in ${SETTINGS_FILE} is not an object; refusing to touch it.`);
@@ -32,8 +31,7 @@ if (dryRun) {
   console.log(JSON.stringify(settings, null, 2));
   process.exit(0);
 }
-const bak = backupSettings();
-writeSettings(settings);
+const bak = commitSettings(settings);
 console.log(`Installed pawgents-office hooks for ${added.length} events: ${added.join(', ')}`);
 console.log(`  command: ${HOOK_COMMAND}`);
 if (bak) console.log(`  backup:  ${bak}`);
