@@ -13,6 +13,7 @@ import { serveStatic, sendFile } from './static.mjs';
 import { pollRegistry } from './registry.mjs';
 import { Tailer } from './transcript.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
+import { readBody, json, readJson, findSession, orcaError } from './http.mjs';
 import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
 
 const store = new Store();
@@ -24,46 +25,6 @@ const tailer = new Tailer(store);
 // Boot: rebuild from the live session registry + transcripts before accepting clients.
 pollRegistry(store);
 tailer.tick();
-
-function readBody(req, limit) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    req.on('data', (c) => {
-      size += c.length;
-      if (size > limit) { reject(new Error('body too large')); req.destroy(); return; }
-      chunks.push(c);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-function json(res, status, data) {
-  const body = JSON.stringify(data);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-  res.end(body);
-}
-
-// Endpoints that type into terminals must come from our own page: a same-origin JSON POST.
-// Host check blocks DNS rebinding; Origin + JSON content-type block cross-site form/fetch posts.
-const OWN_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
-function isOwnPage(req) {
-  const host = req.headers.host || '';
-  return OWN_HOSTS.has(host) && req.headers.origin === `http://${host}`
-    && /^application\/json(;|$)/i.test(req.headers['content-type'] || '');
-}
-
-async function readJson(req, res) {
-  if (!isOwnPage(req)) { json(res, 403, { error: 'forbidden' }); return null; }
-  let body;
-  try { body = await readBody(req, MAX_BODY_BYTES); } catch { json(res, 413, { error: 'body too large' }); return null; }
-  const data = safeJsonParse(body);
-  if (!data || typeof data !== 'object') { json(res, 400, { error: 'bad json' }); return null; }
-  return data;
-}
-
-const orcaError = (res, e) => json(res, e.code === 'terminal_not_found' || e.code === 'not_claude' ? 409 : 502, { error: e.message, code: e.code });
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${HOST}`);
@@ -92,16 +53,17 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/healthz') { res.writeHead(200); res.end('ok'); return; }
     const m = req.method === 'GET' && p.match(/^\/sessions\/([^/]+)\/log$/);
     if (m) {
-      const s = store.sessions.get(decodeURIComponent(m[1]));
-      if (!s) { json(res, 404, { error: 'not found' }); return; }
+      const s = findSession(store, res, decodeURIComponent(m[1]));
+      if (!s) return;
       json(res, 200, { id: s.id, log: s.log.toArray() });
       return;
     }
     const rm = req.method === 'GET' && p.match(/^\/sessions\/([^/]+)\/reply$/);
     if (rm) {
-      const s = store.sessions.get(decodeURIComponent(rm[1]));
+      const s = findSession(store, res, decodeURIComponent(rm[1]));
+      if (!s) return;
       const agentId = url.searchParams.get('agent');
-      const ent = agentId ? s?.subagents.get(agentId) : s;
+      const ent = agentId ? s.subagents.get(agentId) : s;
       if (!ent) { json(res, 404, { error: 'not found' }); return; }
       json(res, 200, { id: s.id, agentId, text: ent.replyText || ent.lastText || '', at: ent.lastTextAt });
       return;
@@ -110,8 +72,8 @@ const server = http.createServer(async (req, res) => {
     if (pm) {
       const data = await readJson(req, res);
       if (!data) return;
-      const s = store.sessions.get(decodeURIComponent(pm[1]));
-      if (!s || s.ended) { json(res, 404, { error: '세션이 없거나 종료되었습니다.' }); return; }
+      const s = findSession(store, res, decodeURIComponent(pm[1]), { live: true, msg: '세션이 없거나 종료되었습니다.' });
+      if (!s) return;
       const text = String(data.text ?? '').trim();
       if (!text || text.length > MAX_PROMPT_CHARS) { json(res, 400, { error: `지시는 1–${MAX_PROMPT_CHARS}자여야 합니다.` }); return; }
       // A permission/question dialog would take our Enter as its default answer.
@@ -128,8 +90,8 @@ const server = http.createServer(async (req, res) => {
     if (cm) {
       const data = await readJson(req, res);
       if (!data) return;
-      const s = store.sessions.get(decodeURIComponent(cm[1]));
-      if (!s || s.ended) { json(res, 404, { error: '세션이 없거나 이미 종료되었습니다.' }); return; }
+      const s = findSession(store, res, decodeURIComponent(cm[1]), { live: true, msg: '세션이 없거나 이미 종료되었습니다.' });
+      if (!s) return;
       const force = data.force === true;
       // `/exit` is only safe at an idle prompt; the client re-asks with force otherwise.
       if (!force && s.state !== 'idle') { json(res, 409, { error: '작업 중이거나 응답 대기 중이라 /exit 를 보낼 수 없습니다. 강제 종료를 쓰세요.', code: 'busy' }); return; }
