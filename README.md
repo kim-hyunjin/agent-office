@@ -41,7 +41,7 @@ claude                 # 아무 터미널, 아무 레포에서 평소처럼 사�
 ```bash
 pnpm demo              # Claude 없이 가짜 직원 2명으로 화면 확인
 pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
-pnpm test              # node --test: 공유 상수·레이아웃 순수 함수, 파일 diff 테스트
+pnpm test              # node --test: 공유 상수·레이아웃 순수 함수, 파일 diff·헤드리스 백엔드 테스트
 ```
 
 `pnpm`이 없으면 `node server/index.mjs`, `node hooks/install.mjs` 처럼 직접 실행해도 됩니다.
@@ -131,18 +131,46 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수,
 
 `hooks/send.mjs`는 `tool_response`의 앞 400자만 남기고 버리며, Agent 툴의 지시문은 600자까지 보조 직원에게 연결합니다. 생각 중 내용과 비용은 transcript에서 읽습니다(thinking 블록, `cost-state`).
 
-## 웹에서 지시하기 (Orca)
+## 웹에서 지시하기
 
-[Orca](https://github.com/stablyai/orca) 터미널에서 실행 중인 세션에는 웹에서 직접 지시를 보낼 수 있습니다. `orca` CLI가 PATH에 있어야 합니다.
+세션을 웹에서 직접 부리는 방법은 둘입니다. [Orca](https://github.com/stablyai/orca) 터미널에서 실행 중인 세션에 지시하거나, Orca 없이 서버가 `claude -p`로 세션을 직접 띄웁니다. `+ 새 직원`에서 고르며, 둘 다 쓸 수 있으면 **실행 방식**(Orca / 직접 실행) 라디오가 나오고 하나만 가능하면 그쪽으로 정해집니다. `PAWGENTS_OFFICE_BACKEND`로 고정할 수도 있습니다(설정 참고).
+
+### Orca 터미널
+
+`orca` CLI가 PATH에 있어야 합니다.
 
 - **기존 직원에게 지시**: 직원을 클릭하고 패널 아래 입력창에 쓰고 Enter를 누릅니다(Shift+Enter는 줄바꿈). 서버가 `orca terminal send`로 그 세션의 터미널에 입력합니다. 직접 타이핑한 것과 똑같이 처리되고, 작업 중이면 Claude Code가 큐에 넣습니다.
-- **새 직원 채용**: 사무실 위 오른쪽의 `+ 새 직원` 버튼을 누르고 워크트리, 인원(1–5명), 모델(선택), 첫 지시(선택)를 고르면 `orca agent launch --agent claude`로 새 세션을 띄웁니다. **새 워크트리 만들기**를 켜면 고른 워크트리의 브랜치에서 분기한 새 워크트리(이름이 브랜치 이름이 됨)에서 시작합니다. 곧 로비로 들어옵니다.
+- **새 직원 채용**: 사무실 위 오른쪽의 `+ 새 직원` 버튼을 누르고 실행 방식(Orca), 워크트리, 인원(1–5명), 모델(선택), 첫 지시(선택)를 고르면 `orca agent launch --agent claude`로 새 세션을 띄웁니다. **새 워크트리 만들기**를 켜면 고른 워크트리의 브랜치에서 분기한 새 워크트리(이름이 브랜치 이름이 됨)에서 시작합니다. 곧 로비로 들어옵니다.
 - **퇴근시키기**: 패널 머리의 `퇴근`을 두 번 누릅니다(첫 클릭은 확인용). 대기 중인 세션은 `/exit`로 깔끔하게 끝납니다. 웹에서 띄운 세션이면 탭도 닫히고, 직접 연 탭이면 셸이 남습니다. 작업 중이거나 권한 응답 대기 중이면 `강제 종료`로 바뀌고, Orca 터미널 탭을 닫아 진행 중인 작업을 끊습니다. 대화는 `claude --resume <세션 ID>`로 이어갈 수 있습니다.
 - 권한 승인이나 질문 응답을 기다리는 세션에는 지시를 보내지 않습니다. 보낸 Enter가 다이얼로그의 기본 선택(승인)으로 들어갈 수 있기 때문입니다. 터미널에서 먼저 답해 주세요.
 
 세션과 터미널은 훅이 보내는 `ORCA_TERMINAL_HANDLE`로 연결합니다(Orca가 관리 터미널에 넣어 주는 변수). 훅이 아직 안 온 세션은 같은 워크트리의 claude 터미널이 하나뿐일 때만 자동으로 짝을 짓습니다. 후보가 여럿이면 그 세션에서 한 번 프롬프트를 보내 연결하세요.
 
-터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다. 파일 내용이 통째로 나가는 `GET /sessions/:id/diff`는 Host를 검사하고, 그 세션의 툴이 실제로 연 파일만 보여줍니다.
+### Orca 없이 쓰기 (claude -p)
+
+서버가 세션마다 작은 중계 프로세스(러너)를 띄우고, 러너가 `claude -p --input-format stream-json --output-format stream-json`을 소유합니다. 사용자의 Claude Code 로그인을 그대로 쓰므로 추가 비용이 없고 npm 의존성도 없습니다. `claude` CLI가 PATH에 있어야 합니다(없으면 `PAWGENTS_OFFICE_CLAUDE_BIN`).
+
+- **새 직원 채용**: `+ 새 직원`에서 **직접 실행 (claude -p)** 을 고릅니다(실행 방식 라디오는 Orca와 둘 다 쓸 수 있을 때만 보입니다).
+  - **작업 폴더**: 서버가 아는 레포(사무실에 등록된 레포와 살아 있는 세션의 레포)의 git 워크트리 목록에서 고르거나 `직접 입력…`으로 절대 경로를 씁니다.
+  - **권한 모드**: `기본`(`default`)은 도구를 쓸 때마다 사무실에서 승인하고, `편집 자동 승인`(`acceptEdits`)은 파일 편집을 묻지 않고, `자동`(`auto`)은 분류기가 판단해 대부분 묻지 않습니다.
+  - **새 워크트리 만들기**: 고른 폴더의 레포에 `<레포>-<이름>` 폴더로 워크트리를 만들고, 같은 이름의 브랜치를 새로 땁니다. 같은 사무실로 출근합니다.
+  - 인원(1–5명), 모델(선택), 첫 지시(선택)는 Orca와 같습니다.
+- **지시**: 패널 입력창에 쓰고 Enter. 작업 중이거나 권한 응답을 기다리는 중에도 보낼 수 있고, 보낸 지시는 큐에 들어가 다음 턴이 됩니다.
+- **권한 승인**: `default` 모드에서 Claude가 승인이 필요한 도구를 쓰면 고양이가 손을 들고 패널에 ✋ 카드(도구·대상·상세)가 뜹니다. **허용**이나 **거부**를 누르면 되고, 30분 안에 답이 없으면 거부로 처리합니다. 동시에 여러 건이 오면 카드도 여러 장입니다. `acceptEdits`/`auto`는 그만큼 덜 묻습니다. 헤드리스에서는 `AskUserQuestion` 도구가 꺼져 있어 질문 다이얼로그는 없습니다.
+- **퇴근시키기**: 패널의 `퇴근`을 두 번 누릅니다. 정상 종료는 입력을 닫아 현재 턴을 마치고 끝내며 `SessionEnd`가 실행됩니다. 작업 중이면 `강제 종료`로 바뀌고, 대기 중인 권한 요청을 모두 거부한 뒤 프로세스 트리를 끝냅니다.
+- **서버를 꺼도 세션은 삽니다**: 러너는 서버와 분리돼 `~/.pawgents-office/run/<세션 ID>.json`과 명명 파이프(Windows) 또는 `.sock`(POSIX)로 남아 있다가, 서버가 다시 뜨면 재연결합니다(서버 로그 `headless restored: N`). 서버가 꺼진 동안 권한 요청이 오면 훅이 서버를 자동으로 띄웁니다(`PAWGENTS_OFFICE_AUTOSTART=0`이면 띄우지 않고 거부로 처리).
+- **터미널에서 이어가기**: `claude --resume <세션 ID>`. `-p` 세션은 `--continue`나 선택 목록에는 안 보입니다.
+
+결정용 훅은 `~/.pawgents-office/headless-settings.json`을 `--settings`로 넘겨 이 방식으로 띄운 세션에만 붙습니다. 터미널에서 직접 연 세션과 플러그인 훅은 그대로입니다. 다른 플러그인의 `PermissionRequest` 훅이 먼저 결정하면 그 결정을 따릅니다.
+
+#### 문제 해결
+
+- **`직접 실행 시작 실패: Not logged in`**: 터미널에서 `claude`를 한 번 실행해 로그인하세요.
+- **`~/.pawgents-office/run/`에 파일이 남아 있음**: 러너가 죽은 흔적입니다. 서버가 시작할 때 정리합니다.
+- **POSIX에서 `.sock`을 못 만듦**: `PAWGENTS_OFFICE_DATA` 경로가 아주 길면 소켓 경로 한도(약 100자)에 걸립니다. 더 짧은 경로를 쓰세요.
+- **Windows에서 서버가 러너에 못 붙음**: 명명 파이프는 같은 사용자 로그온 세션에서만 접근할 수 있습니다.
+
+터미널에 입력을 넣거나 세션을 띄우는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /launch`)와 권한 응답(`POST /sessions/:id/permission`)은 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시나 승인을 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다. 파일 내용이 통째로 나가는 `GET /sessions/:id/diff`는 Host를 검사하고, 그 세션의 툴이 실제로 연 파일만 보여줍니다.
 
 ## 모델별 외형 (직급)
 
@@ -186,6 +214,8 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수,
 | `PAWGENTS_OFFICE_DATA` | `~/.pawgents-office` | 사무실·배치·책상 배정·품종 설정(`state.json`), 스킨(`skins/`)과 서버 로그 저장 위치 |
 | `PAWGENTS_OFFICE_DEBUG` | | `1`이면 훅 스크립트가 `~/.pawgents-office/hook.log`에 기록 |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code 설정 디렉터리를 옮긴 경우 |
+| `PAWGENTS_OFFICE_BACKEND` | `auto` | 새 직원을 띄우는 방식. `auto`는 쓸 수 있는 쪽을 모두 보여주고, `orca` / `headless`로 고정할 수 있습니다. |
+| `PAWGENTS_OFFICE_CLAUDE_BIN` | `claude` | 직접 실행(`claude -p`)이 쓰는 claude 실행 파일. PATH에 없을 때 경로를 지정합니다. |
 | `PAWGENTS_OFFICE_ORCA_BIN` | `orca.exe` (Windows) / `orca` (macOS) / `orca-ide` (Linux) | Orca CLI 실행 파일. `ORCA_CLI_COMMAND`가 있으면 그 값을 씁니다. |
 
 ## 트러블슈팅
@@ -201,7 +231,8 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수,
 server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · http.mjs(요청 처리 공용) · skins.mjs(스킨 id·검증)
           reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별) · diff.mjs(git diff·status) · files.mjs(작업한 파일 동기화)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail)
-          backends/index.mjs(백엔드 선택) · backends/orca.mjs(Orca CLI 연동)
+          backends/index.mjs(백엔드 선택) · backends/orca.mjs(Orca CLI 연동) · backends/headless.mjs(claude -p 러너 관리·권한 대기)
+          backends/git.mjs(git 워크트리) · backends/protocol.mjs(러너 프로토콜) · headless-runner.mjs(세션별 중계 프로세스)
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
 web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루프) · world.js(상태·자리·동선) · feed.js(티커) · viewport.js(배율·줌·리핏)
           render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
@@ -209,9 +240,9 @@ web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루�
           layout-edit.js(배치 편집 연산, DOM 없음) · editor-draw.js(편집 오버레이) · panel.js · roster.js(직원 목록)
           launcher.js(새 직원) · legend.js(모델 안내) · reply.js(전체 답변 창) · diff.js(파일 diff 창) · markdown.js
           api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미, 상태 이름·색·툴 아이콘)
-hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
+hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · decision.mjs(권한 결정 JSON) · ensure.mjs(서버 자동 시작 공용) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
-test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트) · diff.test.mjs(임시 git 저장소로 diff 상태 검사)
+test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트) · diff.test.mjs(임시 git 저장소로 diff 상태 검사) · headless.test.mjs(러너·프로토콜·결정 훅) · fixtures/fake-claude.mjs
 commands/ open.md · stop.md (플러그인 슬래시 명령)
 .claude-plugin/  plugin.json · marketplace.json
 ```
