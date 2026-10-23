@@ -132,6 +132,8 @@ async function screenMode(handle) {
 }
 
 export async function setMode(store, s, mode) {
+  // dontAsk is never in the Shift+Tab cycle: refuse before pressing anything (cycling would leave some other mode on)
+  if (mode === 'dontAsk' && s.permissionMode !== mode) throw orcaErr('dontAsk 모드는 터미널에서 Shift+Tab으로 켤 수 없습니다. claude --permission-mode dontAsk 로 시작해야 합니다.', 'mode_refused');
   if (s.state === 'waiting') throw orcaErr('권한 승인·질문 응답을 기다리는 중입니다. Shift+Tab이 다이얼로그에 들어갈 수 있어 터미널에서 먼저 답해주세요.', 'waiting');
   const t = await resolveTerminal(store, s);
   store.setTerminal(s, t.handle);

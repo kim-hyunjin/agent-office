@@ -4,6 +4,7 @@ import { openDiff, refreshDiff } from './diff.js';
 import { api, post, closeSession, decidePermission, setMode } from './api.js';
 import { esc, fmtTime, setMsg, ICON, EV_ICON, MODE_LABEL, BUSY, STATE_LABEL, STATE_COLOR, awaitingBg, bgSummary, toolText, thinkingFresh, isHeadless, quitTitle } from './ui.js';
 
+const TUI_UNREACHABLE = new Set(['dontAsk', 'bypassPermissions']); // modes Shift+Tab can't be relied on to reach
 const GIT_LABEL = { M: '수정됨 (git)', A: '추가됨 (git)', D: '삭제됨 (git)', '?': '새 파일 (아직 git에 없음)', R: '이름 바뀜 (git)', C: '복사됨 (git)', U: '충돌 (git)' };
 
 export class Panel {
@@ -144,11 +145,20 @@ export class Panel {
     }
   }
 
-  /** The select follows the session's mode except while the user has it open or a switch is in flight. */
+  /**
+   * The select follows the session's mode except while the user has it open or a switch is in flight.
+   * A terminal session switches by Shift+Tab, which never reaches dontAsk, nor bypass unless claude started with
+   * --dangerously-skip-permissions: those stay hidden there unless the session is already in them.
+   */
   renderMode(s) {
     const sel = this.modeSel;
     sel.hidden = !!s.ended;
     sel.disabled = !!s.ended || !!this.modeBusy || (!isHeadless(s) && s.state === 'waiting');
+    for (const o of sel.options) {
+      if (!o.value) continue;
+      const off = !isHeadless(s) && TUI_UNREACHABLE.has(o.value) && s.permissionMode !== o.value;
+      o.hidden = off; o.disabled = off; // disabled too: Safari ignores hidden <option>s
+    }
     if (this.modeBusy || document.activeElement === sel) return;
     const known = [...sel.options].some((o) => o.value && o.value === s.permissionMode);
     sel.value = known ? s.permissionMode : '';
