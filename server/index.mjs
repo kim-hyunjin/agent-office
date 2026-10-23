@@ -171,13 +171,13 @@ const server = http.createServer(async (req, res) => {
     }
     // offices: POST /offices/:id/layout {layout} · POST /offices/:id/reset · POST /offices/:id {name} · DELETE /offices/:id
     const om = p.match(/^\/offices\/([^/]+)(\/layout|\/reset)?$/);
-    if (om && (req.method === 'POST' || req.method === 'DELETE')) {
+    if (om && (req.method === 'POST' || (req.method === 'DELETE' && !om[2]))) {
       const id = decodeURIComponent(om[1]), office = store.office(id);
       const data = await readJson(req, res);
       if (!data) return;
       if (!office) { json(res, 404, { error: '사무실이 없습니다.' }); return; }
       if (req.method === 'DELETE') {
-        if (om[2] || id === DEFAULT_OFFICE_ID) { json(res, 400, { error: '기본 사무실은 닫을 수 없습니다.' }); return; }
+        if (id === DEFAULT_OFFICE_ID) { json(res, 400, { error: '기본 사무실은 닫을 수 없습니다.' }); return; }
         store.deleteOffice(id);
         console.log(`[web] office closed: ${office.name}`);
       } else if (om[2] === '/layout') {
