@@ -7,7 +7,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { pipePath, runFile, encode, newFeed, feed, parseCommand, parseClaudeLine, buildClaudeArgs, versionAtLeast, userMessageLine, runnerArgv, parseRunnerArgv, MAX_LINE_BYTES } from '../server/backends/protocol.mjs';
+import { pipePath, runFile, encode, newFeed, feed, parseCommand, parseClaudeLine, buildClaudeArgs, versionAtLeast, userMessageLine, setModeLine, runnerArgv, parseRunnerArgv, MAX_LINE_BYTES } from '../server/backends/protocol.mjs';
 import { RUN_DIR, MAX_PROMPT_CHARS } from '../server/config.mjs';
 import { parseWorktrees, repoRoots } from '../server/backends/git.mjs';
 
@@ -51,6 +51,28 @@ test('parseCommand accepts the four commands and rejects the rest', () => {
   assert.deepEqual(parseCommand({ type: 'prompt', text: '  hi  ' }), { type: 'prompt', text: 'hi' });
   for (const t of ['close', 'kill', 'status']) assert.deepEqual(parseCommand({ type: t, extra: 1 }), { type: t });
   for (const bad of [null, 'prompt', {}, { type: 'prompt' }, { type: 'prompt', text: '   ' }, { type: 'prompt', text: 5 }, { type: 'prompt', text: 'x'.repeat(MAX_PROMPT_CHARS + 1) }, { type: 'nope' }]) assert.equal(parseCommand(bad), null);
+});
+
+test('mode: command, control request line, status and control_response parsing', () => {
+  assert.deepEqual(parseCommand({ type: 'mode', mode: 'plan' }), { type: 'mode', mode: 'plan' });
+  for (const bad of [{ type: 'mode' }, { type: 'mode', mode: 'yolo' }, { type: 'mode', mode: 5 }]) assert.equal(parseCommand(bad), null);
+  assert.deepEqual(JSON.parse(setModeLine('r1', 'auto')), { type: 'control_request', request_id: 'r1', request: { subtype: 'set_permission_mode', mode: 'auto' } });
+  assert.deepEqual(parseClaudeLine({ type: 'system', subtype: 'status', status: null, permissionMode: 'acceptEdits' }), { kind: 'mode', mode: 'acceptEdits' });
+  assert.equal(parseClaudeLine({ type: 'system', subtype: 'status', status: 'compacting' }), null);
+  assert.deepEqual(parseClaudeLine({ type: 'control_response', response: { subtype: 'success', request_id: 'r1', response: { mode: 'plan' } } }), { kind: 'control', requestId: 'r1', ok: true, error: null, errorCode: null });
+  assert.deepEqual(parseClaudeLine({ type: 'control_response', response: { subtype: 'error', request_id: 'r2', error: 'nope', error_code: 'bypass_not_launched' } }), { kind: 'control', requestId: 'r2', ok: false, error: 'nope', errorCode: 'bypass_not_launched' });
+});
+
+test('Orca footerMode reads the mode line under the input box', async () => {
+  const { footerMode } = await import('../server/backends/orca.mjs');
+  const box = ['● some answer that says plan mode on', '─'.repeat(60), '> ', '─'.repeat(60)];
+  assert.equal(footerMode([...box, '  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent']), 'auto');
+  assert.equal(footerMode([...box, '  ⏵⏵ accept edits on (shift+tab to cycle)']), 'acceptEdits');
+  assert.equal(footerMode([...box, '  ⏸ plan mode on (shift+tab to cycle)']), 'plan');
+  assert.equal(footerMode([...box, '  ⏵⏵ bypass permissions on (shift+tab to cycle)']), 'bypassPermissions');
+  assert.equal(footerMode([...box, '  ⏸ manual mode on · ← 1 agent']), 'default');
+  assert.equal(footerMode([...box, '  ? for shortcuts']), 'default'); // the answer above the box doesn't count
+  assert.equal(footerMode(['Select model', '❯ 1. Opus']), null); // no input box on screen
 });
 
 test('parseClaudeLine keeps init, result and permission denials only', () => {
@@ -126,6 +148,13 @@ test('runner: hello, prompt -> ack + result, status, close -> exit 0, run file r
     const res = await waitFor((m) => m.type === 'event' && m.kind === 'result', 'result');
     assert.equal(res.isError, false); assert.equal(res.costUsd, 0.001);
     assert.ok([...hello.recent, ...msgs.filter((m) => m.type === 'event')].some((e) => e.kind === 'init' && e.sessionId === sid)); // init may predate our connection: then it's in hello.recent
+    sock.write(encode({ type: 'mode', mode: 'plan' }));
+    assert.equal((await waitFor((m) => m.type === 'ack' && m.for === 'mode', 'mode ack')).ok, true);
+    await waitFor((m) => m.type === 'event' && m.kind === 'mode' && m.mode === 'plan', 'mode event');
+    sock.write(encode({ type: 'mode', mode: 'bypassPermissions' }));
+    const refused = await waitFor((m) => m.type === 'ack' && m.for === 'mode' && !m.ok, 'mode refusal');
+    assert.equal(refused.code, 'bypass_not_launched');
+    assert.equal(msgs.some((m) => m.type === 'event' && m.kind === 'control'), false); // answers go to the asker only
     sock.write(encode({ type: 'status' }));
     assert.equal((await waitFor((m) => m.type === 'status', 'status')).alive, true);
     sock.write(encode({ type: 'bogus' }));
@@ -287,4 +316,21 @@ test('send.mjs --decide: prints the office decision, nothing when there is none'
     srv.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('defaultModel: ANTHROPIC_MODEL, then local, project and user settings', async () => {
+  const { defaultModel } = await import('../server/backends/headless.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pawgents-model-'));
+  const user = path.join(tmp, 'user'), proj = path.join(tmp, 'proj');
+  fs.mkdirSync(user); fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
+  assert.equal(defaultModel(proj, {}, user), null); // nothing set: claude's account default, unknown until init
+  fs.writeFileSync(path.join(user, 'settings.json'), JSON.stringify({ model: 'opus' }));
+  assert.equal(defaultModel(proj, {}, user), 'opus');
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.json'), JSON.stringify({ model: 'sonnet' }));
+  assert.equal(defaultModel(proj, {}, user), 'sonnet');
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.local.json'), '{ not json');
+  assert.equal(defaultModel(proj, {}, user), 'sonnet'); // a broken file is skipped
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.local.json'), JSON.stringify({ model: 'haiku' }));
+  assert.equal(defaultModel(proj, {}, user), 'haiku');
+  assert.equal(defaultModel(proj, { ANTHROPIC_MODEL: 'claude-fable-5-1' }, user), 'claude-fable-5-1');
 });

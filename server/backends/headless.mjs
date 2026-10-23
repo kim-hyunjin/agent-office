@@ -7,7 +7,7 @@ import { spawn, spawnSync, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
-  PORT, DATA_DIR, RUN_DIR, PROJECTS_DIR, CLAUDE_BIN, BACKEND_PROBE_TTL_MS,
+  PORT, DATA_DIR, RUN_DIR, PROJECTS_DIR, CLAUDE_DIR, CLAUDE_BIN, BACKEND_PROBE_TTL_MS,
   HEADLESS_LAUNCH_WAIT_MS, HEADLESS_EARLY_EXIT_MS, RUNNER_CMD_TIMEOUT_MS, RUNNER_RECONNECT_MS, RUNNER_RECONNECT_TRIES,
   HEADLESS_SETTINGS_FILE, PERMISSION_WAIT_MS, PERMISSION_HEARTBEAT_MS,
 } from '../config.mjs';
@@ -78,9 +78,26 @@ export function stripClaudeEnv(env) {
 /** Env for the runner (and so claude and its hooks): our port and data dir, so the plugin hooks report to this server. */
 export const childEnv = (env = process.env) => ({ ...stripClaudeEnv(env), PAWGENTS_OFFICE_PORT: String(PORT), PAWGENTS_OFFICE_DATA: DATA_DIR });
 
+/**
+ * The model claude picks when no --model is given: ANTHROPIC_MODEL, else the `model` of the project's local, project
+ * and user settings (that order). null: claude's own account default, which only its init line reveals. stream-json
+ * claude sends that line with its first turn, so without this a session hired with no first prompt has no model (a
+ * '—' in the panel, and no cat family, so no skin) until it is given work.
+ */
+export function defaultModel(cwd, env = process.env, claudeDir = CLAUDE_DIR) {
+  if (env.ANTHROPIC_MODEL) return String(env.ANTHROPIC_MODEL);
+  const files = [...(cwd ? [path.join(cwd, '.claude', 'settings.local.json'), path.join(cwd, '.claude', 'settings.json')] : []), path.join(claudeDir, 'settings.json')];
+  for (const f of files) {
+    const m = safeJsonParse(readSafe(f))?.model;
+    if (typeof m === 'string' && m.trim()) return m.trim();
+  }
+  return null;
+}
+
 // ---- runner connection -------------------------------------------------------------------------------------------
 function attach(store, h) {
   const s = store.getOrCreateSession(h.sid, { cwd: h.cwd, pid: h.claudePid, model: h.model, startedAt: h.startedAt, backend: 'headless', permissionMode: h.permissionMode });
+  s.model ||= h.model || defaultModel(h.cwd); // provisional: claude's init line replaces it with the exact model id
   store.setBackend(s, 'headless'); // registry or a hook may have created it first
   if (h.claudePid && !s.pid) s.pid = h.claudePid;
   s.transcriptPath ||= path.join(PROJECTS_DIR, projectDirName(h.cwd), `${h.sid}.jsonl`);
@@ -129,7 +146,8 @@ function connect(store, sid, info, { onExit } = {}) {
       if (m.type === 'event') {
         if (m.kind === 'stderr') { r.lastStderr = typeof m.line === 'string' ? m.line : r.lastStderr; return; }
         if (!s || s.ended) return;
-        if (m.kind === 'init' && m.model && !s.model) s.model = m.model;
+        if (m.kind === 'init' && m.model) s.model = m.model; // exact id, over defaultModel's guess
+        else if (m.kind === 'mode') { if (s.permissionMode === m.mode) return; s.permissionMode = m.mode; }
         else if (m.kind === 'result' && m.isError) {
           store.log(s, { ev: 'Notification', text: `오류: ${m.subtype || 'error'}` });
           if (s.state !== 'idle') store.setState(s, 'idle'); // no Stop hook follows a failed turn
@@ -149,7 +167,7 @@ function connect(store, sid, info, { onExit } = {}) {
         denyAll(sid, '세션이 종료되었습니다.'); // the hooks die with claude anyway; this clears the cards and logs it
         endIfLive(store, sid, r.killing ? 'killed' : m.code ? `claude 종료 (code ${m.code}): ${truncate(oneLine(tail.at(-1) || r.lastStderr || ''), 200)}` : 'process exited');
         onExit?.(m);
-      } else if (m.type === 'ack') settle(r, m.for, (w) => m.ok ? w.resolve(m) : w.reject(err(m.error || 'runner refused', 'headless_exit')));
+      } else if (m.type === 'ack') settle(r, m.for, (w) => m.ok ? w.resolve(m) : w.reject(Object.assign(err(m.error || 'runner refused', 'headless_exit'), { claudeCode: m.code })));
       else if (m.type === 'status') settle(r, 'status', (w) => w.resolve(m));
       else if (m.type === 'error') settle(r, null, (w) => w.reject(err(m.message || 'runner error', 'headless_exit')));
     };
@@ -228,6 +246,20 @@ export async function launch(store, { cwd, prompt, model, permissionMode }) {
 
 export const has = (sid) => runners.has(sid);
 export const sendPrompt = (store, s, text) => command(s.id, { type: 'prompt', text });
+
+const MODE_REFUSED = {
+  bypass_not_launched: 'bypass 모드는 --dangerously-skip-permissions 로 시작한 세션에서만 켤 수 있습니다.',
+  invalid_mode: '이 claude가 모르는 권한 모드입니다.',
+};
+/** Switch the running claude's permission mode; it confirms with a status line (handled in connect) as well as the ack. */
+export async function setMode(store, s, mode) {
+  try { await command(s.id, { type: 'mode', mode }); } catch (e) {
+    if (e.claudeCode) throw err(MODE_REFUSED[e.claudeCode] || e.message, 'mode_refused');
+    throw e;
+  }
+  s.permissionMode = mode;
+  return { mode };
+}
 
 /** Default: close claude's stdin (it finishes the turn, runs SessionEnd, exits). force: kill the process tree now. */
 export function closeSession(store, s, { force = false } = {}) {

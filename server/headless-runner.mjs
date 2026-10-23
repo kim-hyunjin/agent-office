@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { spawn, execFile } from 'node:child_process';
 import { RUN_DIR } from './config.mjs';
-import { parseRunnerArgv, buildClaudeArgs, pipePath, runFile, encode, newFeed, feed, parseCommand, parseClaudeLine, userMessageLine } from './backends/protocol.mjs';
+import { parseRunnerArgv, buildClaudeArgs, pipePath, runFile, encode, newFeed, feed, parseCommand, parseClaudeLine, userMessageLine, setModeLine } from './backends/protocol.mjs';
 
 const RECENT_MAX = 30, STDERR_MAX = 20, KILL_STEP_MS = 3000, FLUSH_MS = 300;
 const NO_CLIENT_GRACE_MS = 5000; // claude died before anyone connected (bad login, bad flag): keep the socket up so the launcher still learns why
@@ -23,13 +23,24 @@ const child = spawn(q(spec.claude.file), [...spec.claude.prefix, ...buildClaudeA
 
 const clients = new Set(), recent = [], stderrTail = [];
 let exited = null, stdinEnded = false, everConnected = false, finishing = false;
+const control = new Map(); // control request id -> socket that asked (its ack waits for claude's control_response)
+let controlSeq = 0;
 const send = (sock, msg) => { try { sock.write(encode(msg)); } catch {} };
 const broadcast = (msg) => { for (const c of clients) send(c, msg); };
 const event = (ev) => { recent.push(ev); if (recent.length > RECENT_MAX) recent.shift(); broadcast({ type: 'event', ...ev }); };
 
 const out = newFeed();
 child.stdout.setEncoding('utf8');
-child.stdout.on('data', (d) => feed(out, d, (o) => { const ev = parseClaudeLine(o); if (ev) event(ev); }));
+child.stdout.on('data', (d) => feed(out, d, (o) => {
+  const ev = parseClaudeLine(o);
+  if (ev?.kind === 'control') { // an answer to one client, not an event for everyone
+    const sock = control.get(ev.requestId);
+    if (!sock) return;
+    control.delete(ev.requestId);
+    return send(sock, { type: 'ack', for: 'mode', ok: ev.ok, error: ev.error ?? undefined, code: ev.errorCode ?? undefined });
+  }
+  if (ev) event(ev);
+}));
 let errRem = '';
 child.stderr.setEncoding('utf8');
 child.stderr.on('data', (d) => {
@@ -81,6 +92,13 @@ function onCommand(sock, cmd) {
     if (exited || stdinEnded || child.stdin.writableEnded) return send(sock, { type: 'ack', for: 'prompt', ok: false, error: exited ? 'claude has exited' : 'input already closed' });
     child.stdin.write(userMessageLine(cmd.text));
     return send(sock, { type: 'ack', for: 'prompt', ok: true });
+  }
+  if (cmd.type === 'mode') {
+    if (exited || stdinEnded || child.stdin.writableEnded) return send(sock, { type: 'ack', for: 'mode', ok: false, error: exited ? 'claude has exited' : 'input already closed' });
+    const id = `po-mode-${++controlSeq}`;
+    control.set(id, sock);
+    child.stdin.write(setModeLine(id, cmd.mode));
+    return;
   }
   if (cmd.type === 'close') { stdinEnded = true; try { child.stdin.end(); } catch {} return send(sock, { type: 'ack', for: 'close', ok: true }); }
   if (cmd.type === 'kill') { killChild(); return send(sock, { type: 'ack', for: 'kill', ok: true }); }

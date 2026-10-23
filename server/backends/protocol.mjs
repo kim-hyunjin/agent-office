@@ -42,6 +42,7 @@ export function parseCommand(obj) {
     const text = obj.text.trim();
     return text.length >= 1 && text.length <= MAX_PROMPT_CHARS ? { type: 'prompt', text } : null;
   }
+  if (obj.type === 'mode') return PERMISSION_MODES.includes(obj.mode) ? { type: 'mode', mode: obj.mode } : null;
   return ['close', 'kill', 'status'].includes(obj.type) ? { type: obj.type } : null;
 }
 
@@ -52,6 +53,12 @@ export function parseClaudeLine(o) {
   if (o.type === 'system' && o.subtype === 'permission_denied') {
     const tool = o.tool_name ?? o.tool ?? o.toolName;
     return { kind: 'denied', tool: typeof tool === 'string' ? tool : typeof tool?.name === 'string' ? tool.name : null };
+  }
+  // the mode in effect (after set_permission_mode, or when plan mode is left); null status lines carry it too
+  if (o.type === 'system' && o.subtype === 'status' && PERMISSION_MODES.includes(o.permissionMode)) return { kind: 'mode', mode: o.permissionMode };
+  if (o.type === 'control_response' && o.response && typeof o.response.request_id === 'string') {
+    const r = o.response, ok = r.subtype === 'success';
+    return { kind: 'control', requestId: r.request_id, ok, error: ok ? null : String(r.error || 'control request failed').slice(0, 300), errorCode: typeof r.error_code === 'string' ? r.error_code : null };
   }
   if (o.type === 'result') return { kind: 'result', isError: o.is_error === true, subtype: typeof o.subtype === 'string' ? o.subtype : null, costUsd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : null, denials: Array.isArray(o.permission_denials) ? o.permission_denials.slice(0, 20).map((d) => String(d?.tool_name ?? d?.tool ?? '?')) : [] };
   return null;
@@ -78,6 +85,8 @@ export function buildClaudeArgs({ sid, model, permissionMode, settingsFile, vers
 }
 
 export const userMessageLine = (text) => encode({ type: 'user', message: { role: 'user', content: text } });
+/** Switch a running claude's permission mode (stream-json control request; answered by a control_response). */
+export const setModeLine = (requestId, mode) => encode({ type: 'control_request', request_id: requestId, request: { subtype: 'set_permission_mode', mode } });
 
 // Runner spec travels as one argv token (JSON) so nothing is reparsed by a shell.
 export const runnerArgv = (spec) => [JSON.stringify(spec)];

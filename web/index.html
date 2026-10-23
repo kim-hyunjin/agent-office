@@ -193,6 +193,15 @@
     <div id="p-perm" hidden></div>
     <textarea id="p-input" rows="2" placeholder="이 직원에게 지시…  (Enter 보내기 · Shift+Enter 줄바꿈)"></textarea>
     <div class="row">
+      <select id="p-mode" title="권한 모드 바꾸기 (Orca 터미널은 Shift+Tab으로 전환)">
+        <option value="default">기본</option>
+        <option value="acceptEdits">편집 자동 승인</option>
+        <option value="plan">계획</option>
+        <option value="auto">자동</option>
+        <option value="dontAsk">자동 (dontAsk)</option>
+        <option value="bypassPermissions">자동 (bypass)</option>
+        <option value="" hidden>모드 —</option>
+      </select>
       <span id="p-compose-msg" class="msg"></span>
       <button type="submit" id="p-send" class="primary">보내기</button>
     </div>

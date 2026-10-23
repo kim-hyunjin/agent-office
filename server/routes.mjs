@@ -178,6 +178,22 @@ export function makeRoutes({ store, sse }) {
         json(res, 200, { ok: true });
       } catch (e) { backendError(res, e); }
     }],
+    ['POST', /^\/sessions\/([^/]+)\/mode$/, async ({ req, res, params: [id] }) => {
+      const data = await readJson(req, res);
+      if (!data) return;
+      const mode = String(data.mode ?? '');
+      if (!PERMISSION_MODES.includes(mode)) { json(res, 400, { error: '알 수 없는 권한 모드입니다.' }); return; }
+      const s = findSession(store, res, id, { live: true, msg: '세션이 없거나 종료되었습니다.' });
+      if (!s) return;
+      const b = forSession(s);
+      if (!b) { json(res, 409, DETACHED); return; }
+      try {
+        await b.setMode(store, s, mode);
+        console.log(`[web] mode ${mode} → ${s.name} (${s.id.slice(0, 8)})`);
+        store.emitSession(s);
+        json(res, 200, { ok: true, mode: s.permissionMode });
+      } catch (e) { backendError(res, e); }
+    }],
     ['POST', /^\/sessions\/([^/]+)\/permission$/, async ({ req, res, params: [id] }) => {
       const data = await readJson(req, res);
       if (!data) return;
