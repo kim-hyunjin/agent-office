@@ -142,7 +142,7 @@ pnpm test              # node --test: 공유 상수·레이아웃 순수 함수,
 
 세션과 터미널은 훅이 보내는 `ORCA_TERMINAL_HANDLE`로 연결합니다(Orca가 관리 터미널에 넣어 주는 변수). 훅이 아직 안 온 세션은 같은 워크트리의 claude 터미널이 하나뿐일 때만 자동으로 짝을 짓습니다. 후보가 여럿이면 그 세션에서 한 번 프롬프트를 보내 연결하세요.
 
-터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /orca/launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다. 파일 내용이 통째로 나가는 `GET /sessions/:id/diff`는 Host를 검사하고, 그 세션의 툴이 실제로 연 파일만 보여줍니다.
+터미널에 입력을 넣는 엔드포인트(`POST /sessions/:id/prompt`, `POST /sessions/:id/close`, `POST /launch`)는 같은 출처의 JSON 요청만 받습니다(Host·Origin·Content-Type 검사). 다른 웹페이지가 지시를 몰래 보낼 수 없고, `/hook`도 브라우저 요청(Origin 헤더 있음)은 거부합니다. 파일 내용이 통째로 나가는 `GET /sessions/:id/diff`는 Host를 검사하고, 그 세션의 툴이 실제로 연 파일만 보여줍니다.
 
 ## 모델별 외형 (직급)
 

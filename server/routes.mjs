@@ -184,9 +184,6 @@ export function makeRoutes({ store, sse }) {
         else json(res, 400, { error: '알 수 없는 백엔드입니다.' });
       } catch (e) { backendError(res, e); }
     }],
-    ['GET', '/orca/worktrees', async ({ res }) => {
-      try { json(res, 200, { worktrees: await listWorktrees() }); } catch (e) { backendError(res, e); }
-    }],
     ['POST', '/settings/together', async ({ req, res }) => {
       const data = await readJson(req, res);
       if (!data) return;
@@ -262,10 +259,6 @@ export function makeRoutes({ store, sse }) {
     ['POST', '/launch', async ({ req, res }) => {
       const data = await readJson(req, res);
       if (data) await launch(res, data);
-    }],
-    ['POST', '/orca/launch', async ({ req, res }) => { // old launcher; Step 4 drops it
-      const data = await readJson(req, res);
-      if (data) await launch(res, { ...data, backend: 'orca' });
     }],
   ];
 }

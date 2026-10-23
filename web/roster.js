@@ -2,7 +2,7 @@
 // detail panel, or send one home (two clicks, like the panel's 퇴근 button). Toggled from the HUD's "목록" button.
 import { FAMILIES, familyOf, sprite } from './sprites.js';
 import { closeSession } from './api.js';
-import { esc, pic, STATE_LABEL, STATE_COLOR, BUSY, toolText } from './ui.js';
+import { esc, pic, STATE_LABEL, STATE_COLOR, BUSY, toolText, quitTitle } from './ui.js';
 
 const ICON_ZOOM = 2;
 
@@ -87,10 +87,10 @@ export class Roster {
     if (this.pending.has(s.id)) { r.quit.textContent = '퇴근 중…'; r.quit.disabled = true; r.quit.className = 'quit'; }
     else if (this.armed === s.id) { r.quit.textContent = busy ? '강제 종료?' : '정말 퇴근?'; r.quit.disabled = false; r.quit.className = 'quit armed'; }
     else { r.quit.textContent = '퇴근'; r.quit.disabled = false; r.quit.className = 'quit'; }
-    r.quit.title = busy ? `${BUSY.has(s.state) ? '작업 중' : '응답 대기'} — Orca 터미널 탭을 닫아 끊습니다` : '/exit 로 세션을 끝냅니다';
+    r.quit.title = busy ? `${BUSY.has(s.state) ? '작업 중' : '응답 대기'} — ${quitTitle(s, true)}` : quitTitle(s, false);
   }
 
-  /** First click arms (4s), second sends: idle → /exit, otherwise close the terminal (same rule as the panel). */
+  /** First click arms (4s), second sends: idle → a clean end, otherwise a forced close (same rule as the panel). */
   async quit(s) {
     if (!s || this.pending.has(s.id)) return;
     if (this.armed !== s.id) {
