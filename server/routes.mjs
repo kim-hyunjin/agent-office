@@ -9,7 +9,7 @@ import { hasSkin, skinError } from './skins.mjs';
 import { applyHook } from './reducer.mjs';
 import { sendFile } from './static.mjs';
 import { safeJsonParse, truncate, oneLine } from './util.mjs';
-import { readBody, json, readJson, findSession, orcaError } from './http.mjs';
+import { readBody, tooLarge, json, readJson, findSession, orcaError } from './http.mjs';
 import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './orca.mjs';
 
 /** @returns {Array<[string, string | RegExp, (ctx: { req, res, url: URL, params: string[] }) => unknown]>} */
@@ -27,7 +27,7 @@ export function makeRoutes({ store, sse }) {
     ['POST', '/hook', async ({ req, res }) => {
       if (req.headers.origin) { res.writeHead(403); res.end(); return; } // hooks never send Origin; browsers always do
       let body = '';
-      try { body = await readBody(req, MAX_BODY_BYTES); } catch { res.writeHead(413); res.end(); return; }
+      try { body = await readBody(req, MAX_BODY_BYTES); } catch { tooLarge(req, res); return; }
       const ev = safeJsonParse(body);
       const s = ev ? applyHook(store, ev) : null;
       if (s && ev) {

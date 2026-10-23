@@ -8,12 +8,22 @@ export function readBody(req, limit) {
     let size = 0;
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) { reject(new Error('body too large')); req.destroy(); return; }
+      // Stop reading but keep the socket open: the 413 still has to reach the client (see tooLarge).
+      if (size > limit) { req.removeAllListeners('data'); req.pause(); reject(new Error('body too large')); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
+}
+
+/** Answer 413 and close the connection once the reply has gone out; the unread rest of the body dies with the socket. */
+export function tooLarge(req, res, data) {
+  res.on('finish', () => req.destroy());
+  const headers = { Connection: 'close' };
+  if (data) Object.assign(headers, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.writeHead(413, headers);
+  res.end(data ? JSON.stringify(data) : undefined);
 }
 
 export function json(res, status, data) {
@@ -35,7 +45,7 @@ function isOwnPage(req) {
 export async function readJson(req, res) {
   if (!isOwnPage(req)) { json(res, 403, { error: 'forbidden' }); return null; }
   let body;
-  try { body = await readBody(req, MAX_BODY_BYTES); } catch { json(res, 413, { error: 'body too large' }); return null; }
+  try { body = await readBody(req, MAX_BODY_BYTES); } catch { tooLarge(req, res, { error: 'body too large' }); return null; }
   const data = safeJsonParse(body);
   if (!data || typeof data !== 'object') { json(res, 400, { error: 'bad json' }); return null; }
   return data;
