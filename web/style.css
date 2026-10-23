@@ -23,6 +23,14 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #tools button.primary { color: #1f2233; background: #ffd166; border-color: #ffd166; font-weight: 700; }
 #tools button.primary:hover { background: #ffe08a; }
 #tools canvas { image-rendering: pixelated; }
+#tools .zoom { display: flex; }
+#tools .zoom button { border-radius: 0; padding: 4px 8px; min-width: 28px; justify-content: center; }
+#tools .zoom button:first-child { border-radius: 6px 0 0 6px; }
+#tools .zoom button:last-child { border-radius: 0 6px 6px 0; }
+#tools .zoom button + button { border-left: 0; }
+#tools .zoom #t-zoom { color: var(--dim); font-variant-numeric: tabular-nums; }
+#tools .zoom #t-zoom.pinned { color: var(--accent); }
+#tools .zoom button:disabled { opacity: .4; cursor: default; }
 #tabs button {
   display: flex; align-items: center; gap: 6px; padding: 5px 12px 4px; font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer;
   color: var(--dim); background: var(--panel); border: 1px solid #2f3352; border-bottom: 0; border-radius: 6px 6px 0 0;

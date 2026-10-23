@@ -4,7 +4,7 @@ import { STATE_LABEL, STATE_COLOR } from './render.js';
 import { FAMILIES, familyOf, sprite, spriteSize } from './sprites.js';
 import { esc, closeSession, BUSY } from './panel.js';
 
-const ICON_ZOOM = 3;
+const ICON_ZOOM = 2;
 
 export class Roster {
   /** onPick(id): open that session's detail panel. placeOf(id): where its cat is right now ('' = at its desk). */

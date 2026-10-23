@@ -11,7 +11,7 @@ import { esc } from './panel.js';
 const dlg = document.getElementById('legend');
 const body = document.getElementById('lg-body');
 const MONITOR = { 'wide-gold': '금색 와이드 모니터', silver: '실버 모니터', normal: '일반 모니터', laptop: '노트북' };
-const ZOOM = 4;
+const ZOOM = 2;
 const MAX_SKIN_BYTES = 512 * 1024; // same limit as the server (config.mjs)
 
 document.getElementById('lg-close').addEventListener('click', () => dlg.close());
@@ -104,7 +104,7 @@ function render(sessions) {
   list.append(
     row(['fable', 'opus', 'sonnet', 'haiku'].map((fam) => looks(breedOf(fam), 'assistant')[0]), '보조 직원 (서브에이전트)',
       ['부모 직원과 같은 품종의 새끼 고양이. 회의실이나 책상 옆에서 일해요.']),
-    row([cat(RECEPTIONIST_PAL)], '안내원', ['로비 카운터에 상주하는 벵갈 고양이(헤드셋). 세션과는 무관해요.']),
+    row([cat(RECEPTIONIST_PAL)], '안내원', ['로비 카운터에 상주하는 안내 로봇. 세션과는 무관해요.']),
   );
   body.replaceChildren(list, skinSection());
   body.scrollTop = scroll;

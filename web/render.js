@@ -161,10 +161,8 @@ function drawReceptionist(g, geo, rc, ents, t) {
   const RECEPTIONIST = rc.cat, RECEPTION = rc.counter;
   const img = sprite(RECEPTIONIST_PAL, greeting ? 'wait' : 'idle', Math.floor(t / (greeting ? 400 : 450)));
   const x = RECEPTIONIST.x * TILE + Math.round((TILE - img.width) / 2);
-  const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // bottom 4 rows tuck behind the counter
+  const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // its lower body tucks behind the counter
   g.drawImage(img, x, y);
-  g.fillStyle = '#3a3d55'; g.fillRect(x + 1, y + 1, 6, 1); g.fillRect(x, y + 2, 1, 2); // headset band + earpiece
-  g.fillStyle = '#f2c94c'; g.fillRect(x + 1, y + 4, 2, 1); // mic
   drawReception(g, RECEPTION.x * TILE, RECEPTION.y * TILE, RECEPTION.w * TILE, false); // shadow is already in the background
 }
 

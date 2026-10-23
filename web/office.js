@@ -105,14 +105,34 @@ const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit trans
 // Width the open panel takes from the office. On narrow windows the panel just covers it.
 const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
 
-// Whole-number zoom, like pixel-art games: every art pixel is the same size on screen. At least MIN_SCALE, more when
-// the window has room; an office bigger than the window scrolls instead of shrinking its pixels.
-const MIN_SCALE = 2;
+// Whole-number zoom, like pixel-art games: every art pixel is the same size on screen. Fit: at least MIN_SCALE, more
+// when the window has room; an office bigger than the window scrolls instead of shrinking its pixels. The −/+ buttons
+// pin a zoom instead (remembered per browser); the zoom button between them goes back to fitting.
+const MIN_SCALE = 2, MAX_SCALE = 8;
+let zoom = null; // pinned scale, or null: fit the window
+try { const z = Math.round(Number(localStorage.getItem('pawgents.zoom'))); zoom = z >= 1 ? Math.min(z, MAX_SCALE) : null; } catch { /* storage blocked */ }
 function fitScale() {
+  if (zoom) return zoom;
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - barEl.offsetHeight;
-  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H)), MIN_SCALE, 8);
+  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H)), MIN_SCALE, MAX_SCALE);
+}
+const zoomBtn = document.getElementById('t-zoom');
+function setZoom(z) {
+  zoom = z ? clamp(z, 1, MAX_SCALE) : null;
+  try { if (zoom) localStorage.setItem('pawgents.zoom', zoom); else localStorage.removeItem('pawgents.zoom'); } catch { /* storage blocked */ }
+  resize();
+}
+document.getElementById('t-zoom-out').addEventListener('click', () => setZoom(S - 1));
+document.getElementById('t-zoom-in').addEventListener('click', () => setZoom(S + 1));
+zoomBtn.addEventListener('click', () => setZoom(null));
+function showZoom() {
+  zoomBtn.textContent = `${S}×`;
+  zoomBtn.classList.toggle('pinned', !!zoom);
+  zoomBtn.title = zoom ? '눌러서 창 크기에 맞추기' : '창 크기에 맞춘 배율';
+  document.getElementById('t-zoom-out').disabled = S <= 1;
+  document.getElementById('t-zoom-in').disabled = S >= MAX_SCALE;
 }
 
 /** The ticker (bottom) and the panel (right) float over the page: pad the page so the office can scroll out from under them. */
@@ -132,6 +152,7 @@ function resize() {
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
   barEl.style.width = canvas.style.width;
   toolsEl.classList.toggle('off', editor.isOpen); // the editor has its own buttons
+  showZoom();
   placeTicker();
 }
 
