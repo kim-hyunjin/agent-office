@@ -61,6 +61,6 @@ export function findSession(store, res, id, { live = false, msg = 'not found' } 
 }
 
 // Backend failures the user can act on (wrong tab, claude died, runner not attached, git refused) are 409; the rest is upstream trouble.
-export const BACKEND_ERROR_STATUS = { terminal_not_found: 409, not_claude: 409, headless_exit: 409, detached: 409, headless_unavailable: 409, git_failed: 409, mode_refused: 409, mode_unknown: 409, waiting: 409, ENOENT: 502 };
+export const BACKEND_ERROR_STATUS = { terminal_not_found: 409, not_claude: 409, headless_exit: 409, detached: 409, headless_unavailable: 409, git_failed: 409, mode_refused: 409, mode_unknown: 409, waiting: 409, stale: 409, dialog_unknown: 409, ENOENT: 502 };
 export const backendStatus = (code) => BACKEND_ERROR_STATUS[code] ?? 502;
 export const backendError = (res, e) => json(res, backendStatus(e?.code), { error: e?.message || String(e), code: e?.code });

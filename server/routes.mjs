@@ -200,6 +200,13 @@ export function makeRoutes({ store, sse }) {
       if (typeof data.id !== 'string' || typeof data.allow !== 'boolean') { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
       const s = findSession(store, res, id, { live: true, msg: '세션이 없거나 종료되었습니다.' });
       if (!s) return;
+      if (s.backend !== 'headless') { // an Orca / terminal session: press the dialog's Yes / No in its terminal
+        try { await orca.answerPermission(store, s, data.allow, data.id); } catch (e) { backendError(res, e); return; }
+        console.log(`[web] permission ${data.allow ? 'allow' : 'deny'} ${s.asking?.tool || '?'} (terminal) → ${s.name} (${s.id.slice(0, 8)})`);
+        store.emitSession(s);
+        json(res, 200, { ok: true });
+        return;
+      }
       const p = s.pendingPermissions.find((x) => x.id === data.id);
       if (!headless.decidePermission(store, s, data.id, data.allow)) { json(res, 409, { error: '이미 처리된 요청입니다.', code: 'stale' }); return; }
       console.log(`[web] permission ${data.allow ? 'allow' : 'deny'} ${p?.tool || '?'} → ${s.name} (${s.id.slice(0, 8)})`);
