@@ -194,7 +194,8 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 ## 구조
 
 ```
-server/   index.mjs(HTTP 라우팅) · reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
+server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · http.mjs(요청 처리 공용) · skins.mjs(스킨 id·검증)
+          reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
 web/      index.html · style.css · office.js(진입점) · render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
