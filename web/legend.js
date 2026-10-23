@@ -1,7 +1,6 @@
-// "모델 안내" dialog: which cat stands for which model, opened from the canvas button in the bottom-right corner
-// (render.js drawLegend). Each model row has a breed picker; the choice is saved on the server and pushed to
-// every open office (office.js applies it). Also shows the kittens (subagents) and the receptionist, and manages
-// uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
+// "모델 안내" dialog: which cat stands for which model, opened from the #t-legend toolbar button. Each model row has a
+// breed picker; the choice is saved on the server and pushed to every open office (office.js applies it). Also shows
+// the kittens (subagents) and the receptionist, and manages uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
 import {
   FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, spriteSize, breedPalette, RECEPTIONIST_PAL,
   SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate, skinScale,

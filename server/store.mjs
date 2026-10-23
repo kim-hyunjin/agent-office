@@ -8,14 +8,13 @@ import { debounce, safeJsonParse } from './util.mjs';
 import { repoOf } from './repo.mjs';
 import { DEFAULT_OFFICE, cloneOffice, deskCount, normalize, validate } from '../web/layout.js';
 
-export class RingBuffer {
+class RingBuffer {
   constructor(n) { this.n = n; this.buf = []; }
   push(x) { this.buf.push(x); if (this.buf.length > this.n) this.buf.shift(); }
   toArray() { return this.buf.slice(); }
   last(k) { return this.buf.slice(-k); }
 }
 
-export const STATES = ['idle', 'thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working', 'waiting', 'offduty'];
 const BUSY_STATES = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 export const isBusyState = (s) => BUSY_STATES.has(s);
 export const CAT_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku', 'other'];

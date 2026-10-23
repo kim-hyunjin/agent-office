@@ -246,10 +246,6 @@ function drawEntity(g, geo, e, t, selected, hovered) {
     else if (state === 'waiting') drawGlyph(g, 'bang', gx + 2, gy - 3, t);
     else if (state === 'terminal' || (state === 'idle' && (data.bgTasks?.length || data.awaitingShell))) drawGlyph(g, 'term', gx - 1, gy - 4, t + e.seed);
     else if (act === 'nap') drawGlyph(g, 'zzz', gx + 4, gy - 2, t + e.seed);
-    else if (state === 'delegating' && stationKind === 'desk' && e.planeTo) {
-      const ph = ((t + e.seed) % 1600) / 1600;
-      drawGlyph(g, 'plane', e.x + 8 + (e.planeTo.x - e.x - 8) * ph, e.y - 2 + (e.planeTo.y - e.y + 2) * ph - Math.sin(ph * Math.PI) * 8, t);
-    }
   }
   if (!isAsst && e.phase !== 'leave') {
     if (data.permissionMode === 'acceptEdits') drawGlyph(g, 'check', e.x + ox - 6, e.y + oy + 1, t);

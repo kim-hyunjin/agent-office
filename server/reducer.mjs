@@ -8,7 +8,7 @@ const TOOL_STATE = [
   [/^(Agent|Task)$/, 'delegating'],
   [/^AskUserQuestion$/, 'waiting'],
 ];
-export function stateForTool(tool) {
+function stateForTool(tool) {
   for (const [re, st] of TOOL_STATE) if (re.test(tool)) return st;
   return 'working';
 }
@@ -34,7 +34,6 @@ function apply(store, ev) {
   s.hookEvents++;
   s.lastEventAt = now;
   if (ev.permission_mode) s.permissionMode = ev.permission_mode;
-  if (ev.transcript_path && !s.transcriptPath) s.transcriptPath = ev.transcript_path;
   if (typeof ev.orca_terminal === 'string' && ev.orca_terminal) store.setTerminal(s, ev.orca_terminal);
 
   const agentId = ev.agent_id ? String(ev.agent_id) : null;

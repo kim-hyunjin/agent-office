@@ -15,12 +15,12 @@ export function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-/** Strip code fences / markdown noise so a bubble reads naturally. */
 /** Assistant text kept verbatim (markdown intact) for the reply dialog. */
 export function replyText(s) {
   return truncate(String(s ?? '').trim(), MAX_REPLY_CHARS);
 }
 
+/** Strip code fences / markdown noise so a bubble reads naturally. */
 export function cleanText(s, n = 280) {
   s = String(s ?? '')
     .replace(/```[\s\S]*?```/g, ' [code] ')

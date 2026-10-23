@@ -4,7 +4,7 @@ import { ORCA_BIN } from './config.mjs';
 import { isPidAlive } from './util.mjs';
 
 /** Run `orca <args> --json` and return `result`. Throws Error(message) with `.code` on failure. */
-export function runOrca(args, { timeoutMs = 15_000 } = {}) {
+function runOrca(args, { timeoutMs = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
     // No shell: user text goes through argv untouched (orca.cmd would let cmd.exe reparse it).
     execFile(ORCA_BIN, [...args, '--json'], { timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -22,7 +22,7 @@ const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLo
 const normTitle = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const within = (dir, root) => { const d = norm(dir), r = norm(root); return !!r && (d === r || d.startsWith(r + '/')); };
 
-export async function listTerminals() {
+async function listTerminals() {
   const r = await runOrca(['terminal', 'list']);
   return r.terminals || [];
 }
@@ -49,7 +49,7 @@ export async function listWorktrees() {
  * guess from the single live claude terminal whose worktree contains the session cwd,
  * breaking a tie by the tab title (Orca shows the claude session title there).
  */
-export async function resolveTerminal(store, s) {
+async function resolveTerminal(store, s) {
   const terms = await listTerminals();
   if (s.orcaTerminal) {
     const t = terms.find((x) => x.handle === s.orcaTerminal);

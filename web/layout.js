@@ -5,7 +5,7 @@ export const TILE = 16;
 /** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
 export const WALL_RISE = TILE;
 /** 2: play rooms have walls by default (v1 play rooms without a `walls` field stay open), the front door has a side. */
-export const LAYOUT_VERSION = 2;
+const LAYOUT_VERSION = 2;
 export const MIN_W = 20, MIN_H = 14, MAX_W = 64, MAX_H = 40;
 
 /** Room types: floor colors live in tilemap.js. A room's walls are glass when `glass` (default: meeting rooms). */
@@ -121,7 +121,7 @@ export function normalize(o) {
 const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;
-export const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
+const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
 export const itemRect = (it) => ({ x: it.x, y: it.y, ...(({ w, h }) => ({ w, h }))(itemSize(it)) });
 /** The ring of tiles around a room, where its walls stand. */
 export const ringRect = (r) => ({ x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 });

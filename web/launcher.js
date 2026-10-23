@@ -1,5 +1,5 @@
 // "새 직원" dialog: start a claude session in an Orca worktree via the server's /orca/launch.
-// Opened from the canvas button by the lobby entrance (render.js drawNewButton).
+// Opened from the #t-new toolbar button.
 const dlg = document.getElementById('launcher');
 const form = document.getElementById('l-form');
 const sel = document.getElementById('l-worktree');

@@ -26,7 +26,6 @@ export class Sse {
       try { res.write(chunk); } catch { this.clients.delete(res); }
     }
   }
-  get size() { return this.clients.size; }
 }
 
 function format(type, data) {
