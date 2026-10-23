@@ -123,18 +123,26 @@ export class Panel {
     }
   }
 
-  /** One card per parked permission request; rebuilt only when the set changes (renderMeta runs every second). */
+  /**
+   * One card per parked permission request; rebuilt only when the set changes (renderMeta runs every second).
+   * An Orca / terminal session's dialog gets a read-only card instead: it can only be answered in that terminal.
+   */
   renderPerm(s) {
     const list = s && !s.ended ? s.pendingPermissions || [] : [];
-    const key = `${s?.id}|${list.map((p) => p.id).join(',')}`;
+    const ask = s && !s.ended && !isHeadless(s) && s.state === 'waiting' ? s.asking : null;
+    const key = `${s?.id}|${list.map((p) => p.id).join(',')}|${ask ? `${ask.at}:${ask.tool}:${ask.label}` : ''}`;
     if (key === this.permKey) return;
     this.permKey = key;
     this.permEl.innerHTML = list.map((p) => `<div class="perm" data-id="${esc(p.id)}">
         <div class="hd">✋ <b>${esc(p.tool)}</b>${p.target ? ' · ' + esc(p.target) : ''}</div>
         ${p.detail ? `<div class="detail">${esc(p.detail)}</div>` : ''}
         <div class="row"><button type="button" class="primary" data-allow="1">허용</button><button type="button" data-allow="0">거부</button></div>
-      </div>`).join('');
-    this.permEl.hidden = !list.length;
+      </div>`).join('') + (ask ? `<div class="perm ask">
+        <div class="hd">✋ ${ask.tool ? `<b>${esc(ask.tool)}</b>${ask.target ? ' · ' + esc(ask.target) : ''}` : `<b>${esc(ask.label || '응답 대기')}</b>`}</div>
+        ${ask.detail ? `<div class="detail">${esc(ask.detail)}</div>` : ''}
+        <div class="note">${s.orcaTerminal ? 'Orca 터미널' : '터미널'}에서 답해주세요. 답하면 이 카드는 사라집니다.</div>
+      </div>` : '');
+    this.permEl.hidden = !list.length && !ask;
   }
 
   /**

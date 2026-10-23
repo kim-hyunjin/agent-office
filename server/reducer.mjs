@@ -16,6 +16,15 @@ function touchFile(store, s, tool, input) {
   const fp = FILE_TOOLS.test(tool) && input ? input.file_path || input.notebook_path : null;
   if (typeof fp === 'string' && fp) store.touchFile(s, fp, { edited: EDIT_TOOLS.test(tool) });
 }
+/**
+ * Remember what an interactive session's terminal dialog asks, so the office can show it (it is answered in the terminal).
+ * Headless sessions park their requests as pendingPermissions cards instead. Cleared by the asked call's PostToolUse,
+ * the next prompt, Stop, or the registry reporting the dialog gone (a deny / Esc fires no hook: see syncWaiting).
+ */
+function ask(s, { tool, target, detail, at }) {
+  if (s.backend === 'headless') return;
+  s.asking = { tool, target, detail: detail || null, label: s.asking?.label ?? null, at };
+}
 function stateForTool(tool) {
   for (const [re, st] of TOOL_STATE) if (re.test(tool)) return st;
   return 'working';
@@ -61,7 +70,7 @@ function apply(store, ev) {
     }
     case 'UserPromptSubmit': {
       const prompt = cleanText(ev.prompt || '', 400);
-      if (!agent) { store.setState(s, 'thinking'); s.bgTasks = []; s.lastPrompt = prompt; s.turnStartedAt = now; s.turnTools = 0; }
+      if (!agent) { s.asking = null; store.setState(s, 'thinking'); s.bgTasks = []; s.lastPrompt = prompt; s.turnStartedAt = now; s.turnTools = 0; }
       if (ev.session_title) s.title = oneLine(ev.session_title);
       store.log(s, { ev: name, text: prompt });
       break;
@@ -78,6 +87,7 @@ function apply(store, ev) {
         s.pendingAgents.push({ type: inp.subagent_type || null, description: oneLine(inp.description || ''), task: cleanText(inp.prompt || '', 600), toolUseId: ev.tool_use_id || null, at: now });
         if (s.pendingAgents.length > 20) s.pendingAgents.shift();
       }
+      if (!agent && tool === 'AskUserQuestion') ask(s, { tool, target, detail, at: now });
       store.setState(ent, stateForTool(tool));
       store.log(s, { ev: name, tool, target, detail, text: who });
       break;
@@ -87,6 +97,7 @@ function apply(store, ev) {
       const tool = String(ev.tool_name || '');
       const target = summarizeToolInput(tool, ev.tool_input);
       ent.currentTool = null;
+      if (s.asking?.tool === tool && s.asking.target === target) s.asking = null; // the asked call ran (or failed): answered
       if (ent.state !== 'offduty') store.setState(ent, 'thinking');
       touchFile(store, s, tool, ev.tool_input); // again now that the file is written: an open diff dialog reloads on the new time
       if (EDIT_TOOLS.test(tool) || tool === 'Bash') scheduleFileSync(store, s); // git status catches what the shell changed
@@ -98,6 +109,7 @@ function apply(store, ev) {
     case 'PermissionRequest': {
       const tool = String(ev.tool_name || '');
       const target = summarizeToolInput(tool, ev.tool_input);
+      ask(s, { tool, target, detail: detailForTool(tool, ev.tool_input), at: now });
       store.setState(s, 'waiting');
       // headless sessions get each request twice (the plugin's async hook + our --decide one): log it once
       const [last] = s.log.last(1);
@@ -114,6 +126,7 @@ function apply(store, ev) {
     case 'Stop': {
       const text = cleanText(ev.last_assistant_message || '', 280);
       ent.currentTool = null;
+      if (!agent) s.asking = null;
       store.setState(ent, 'idle');
       if (!agent && Array.isArray(ev.background_tasks)) s.bgTasks = ev.background_tasks.map((t) => ({
         type: String(t.type || ''), description: oneLine(t.description || ''), command: oneLine(t.command || ''),
@@ -165,6 +178,8 @@ function apply(store, ev) {
       store.log(s, { ev: name, text: truncate(oneLine(ev.message || ev.reason || ev.trigger || ''), 120) });
     }
   }
+  // a dialog stays up while parallel tool calls start and finish: their events must not hide it
+  if (s.asking && !s.ended) store.setState(s, 'waiting');
   store.emitSession(s);
   return s;
 }
