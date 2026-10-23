@@ -145,6 +145,9 @@ button.chip:hover, button.chip:focus-visible { filter: brightness(1.25); }
 #p-input:disabled { opacity: .5; }
 #p-compose .row, #launcher .row { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 #p-compose .msg { flex: 1; }
+#p-mode { font: inherit; font-size: 12px; color: var(--text); background: var(--panel-2); border: 1px solid #3b3f5c; border-radius: 6px; padding: 4px 6px; cursor: pointer; }
+#p-mode:focus { outline: none; border-color: var(--accent); }
+#p-mode:disabled { opacity: .5; cursor: default; }
 /* headless permission requests, answered here (one card each) */
 #p-perm { display: grid; gap: 6px; }
 #p-perm[hidden] { display: none; }

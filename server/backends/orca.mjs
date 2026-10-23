@@ -105,6 +105,53 @@ export async function closeSession(store, s, { force = false } = {}) {
   return r;
 }
 
+// ---- permission mode (Shift+Tab in the TUI) --------------------------------------------------------------------
+// The TUI only cycles modes with Shift+Tab, and no hook fires on a switch, so we read the mode off the rendered footer
+// (the line under the input box) and press until it shows the one asked for.
+const SHIFT_TAB = '\x1b[Z';
+const MODE_PRESSES = 6, MODE_SETTLE_MS = 1500, MODE_POLL_MS = 150;
+const FOOTER_MODES = [
+  [/accept edits on/i, 'acceptEdits'], [/plan mode on/i, 'plan'], [/auto mode on/i, 'auto'],
+  [/bypass permissions on/i, 'bypassPermissions'], [/don.?t ask (mode )?on/i, 'dontAsk'], [/manual mode on/i, 'default'], // newer TUIs name default "manual"
+];
+const isBorder = (line) => /^\s*[─━-]{20,}\s*$/.test(line);
+
+/** The mode the TUI footer shows: a mode key, 'default' (no mode line), or null when no input box is on screen. */
+export function footerMode(lines) {
+  const tail = lines.slice(-12);
+  const b = tail.findLastIndex(isBorder);
+  if (b < 0) return null; // a menu, dialog or something else owns the screen
+  const footer = tail.slice(b + 1).join('\n');
+  for (const [re, mode] of FOOTER_MODES) if (re.test(footer)) return mode;
+  return 'default';
+}
+
+async function screenMode(handle) {
+  const r = await runOrca(['terminal', 'read', '--terminal', handle, '--screen']);
+  return footerMode(r?.terminal?.tail || []);
+}
+
+export async function setMode(store, s, mode) {
+  if (s.state === 'waiting') throw orcaErr('권한 승인·질문 응답을 기다리는 중입니다. Shift+Tab이 다이얼로그에 들어갈 수 있어 터미널에서 먼저 답해주세요.', 'waiting');
+  const t = await resolveTerminal(store, s);
+  store.setTerminal(s, t.handle);
+  let cur = await screenMode(t.handle);
+  const seen = [];
+  for (let i = 0; ; i++) {
+    if (!cur) throw orcaErr('터미널 화면에서 Claude 입력창을 찾지 못했습니다. 메뉴나 다이얼로그가 열려 있으면 닫고 다시 시도해주세요.', 'mode_unknown');
+    if (cur === mode) break;
+    if (seen.includes(cur) || i >= MODE_PRESSES) {
+      throw orcaErr(`이 세션의 Shift+Tab 순환에 '${mode}' 모드가 없습니다 (순환: ${seen.join(' → ')}).`, 'mode_refused');
+    }
+    seen.push(cur);
+    await runOrca(['terminal', 'send', '--terminal', t.handle, '--text', SHIFT_TAB]);
+    const prev = cur, end = Date.now() + MODE_SETTLE_MS;
+    do { await new Promise((r) => setTimeout(r, MODE_POLL_MS)); cur = await screenMode(t.handle); } while (cur === prev && Date.now() < end);
+  }
+  s.permissionMode = mode;
+  return { mode };
+}
+
 const launched = new Set(); // terminal handles opened by launchClaude (this server run)
 
 function closeAfterExit(s, handle) {

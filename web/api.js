@@ -12,5 +12,8 @@ export const post = (url, body = {}) => api(url, { method: 'POST', body });
 /** Send a session home. force: close its Orca terminal tab instead of typing /exit (it isn't idle). */
 export const closeSession = (id, force) => post(`/sessions/${encodeURIComponent(id)}/close`, { force });
 
+/** Switch a live session's permission mode (headless: control request; Orca: Shift+Tab until the footer shows it). */
+export const setMode = (id, mode) => post(`/sessions/${encodeURIComponent(id)}/mode`, { mode });
+
 /** Answer a headless session's parked permission request (reqId from s.pendingPermissions). */
 export const decidePermission = (id, reqId, allow) => post(`/sessions/${encodeURIComponent(id)}/permission`, { id: reqId, allow });

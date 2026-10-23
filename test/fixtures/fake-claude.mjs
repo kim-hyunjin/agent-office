@@ -9,6 +9,13 @@ process.stdin.on('data', (chunk) => {
   const lines = (rem + chunk).split('\n'); rem = lines.pop();
   for (const line of lines) {
     let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o?.type === 'control_request' && o.request?.subtype === 'set_permission_mode') { // like claude: bypass needs a launch flag
+      const { mode } = o.request;
+      if (mode === 'bypassPermissions') { out({ type: 'control_response', response: { subtype: 'error', request_id: o.request_id, error: 'not launched with --dangerously-skip-permissions', error_code: 'bypass_not_launched' } }); continue; }
+      out({ type: 'control_response', response: { subtype: 'success', request_id: o.request_id, response: { mode } } });
+      out({ type: 'system', subtype: 'status', status: null, permissionMode: mode, session_id: sid });
+      continue;
+    }
     if (o?.type !== 'user') continue;
     out({ type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] }, session_id: sid });
     out({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.001, result: 'ok', session_id: sid });

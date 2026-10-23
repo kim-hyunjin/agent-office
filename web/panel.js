@@ -1,7 +1,7 @@
 import { FAMILIES, familyOf } from './sprites.js';
 import { openReply, refreshReply } from './reply.js';
 import { openDiff, refreshDiff } from './diff.js';
-import { api, post, closeSession, decidePermission } from './api.js';
+import { api, post, closeSession, decidePermission, setMode } from './api.js';
 import { esc, fmtTime, setMsg, ICON, EV_ICON, MODE_LABEL, BUSY, STATE_LABEL, STATE_COLOR, awaitingBg, bgSummary, toolText, thinkingFresh, isHeadless, quitTitle } from './ui.js';
 
 const GIT_LABEL = { M: '수정됨 (git)', A: '추가됨 (git)', D: '삭제됨 (git)', '?': '새 파일 (아직 git에 없음)', R: '이름 바뀜 (git)', C: '복사됨 (git)', U: '충돌 (git)' };
@@ -33,6 +33,8 @@ export class Panel {
       const b = e.target.closest('button[data-allow]');
       if (b) this.decide(b.closest('.perm'), b.dataset.allow === '1');
     });
+    this.modeSel = el.querySelector('#p-mode');
+    this.modeSel.addEventListener('change', () => this.changeMode(this.modeSel.value));
     this.isOpen = false;
     this.quitBtn = el.querySelector('#p-quit');
     this.quitBtn.addEventListener('click', () => this.quit());
@@ -123,6 +125,35 @@ export class Panel {
     }
   }
 
+  async changeMode(mode) {
+    const s = this.session;
+    if (!s || !mode || this.modeBusy) return;
+    const id = s.id;
+    this.modeBusy = true;
+    this.modeSel.disabled = true;
+    this.setComposeMsg(isHeadless(s) ? '권한 모드 바꾸는 중…' : '권한 모드 바꾸는 중… (Shift+Tab)');
+    try {
+      const r = await setMode(id, mode);
+      if (this.id === id) this.setComposeMsg(`권한 모드: ${MODE_LABEL[r.mode] || r.mode}`, 'ok');
+    } catch (e) {
+      if (this.id === id) this.setComposeMsg(e.message, 'err');
+    } finally {
+      this.modeBusy = false;
+      this.modeSel.blur(); // let it follow the session again
+      if (this.session) this.renderMode(this.session);
+    }
+  }
+
+  /** The select follows the session's mode except while the user has it open or a switch is in flight. */
+  renderMode(s) {
+    const sel = this.modeSel;
+    sel.hidden = !!s.ended;
+    sel.disabled = !!s.ended || !!this.modeBusy || (!isHeadless(s) && s.state === 'waiting');
+    if (this.modeBusy || document.activeElement === sel) return;
+    const known = [...sel.options].some((o) => o.value && o.value === s.permissionMode);
+    sel.value = known ? s.permissionMode : '';
+  }
+
   /** One card per parked permission request; rebuilt only when the set changes (renderMeta runs every second). */
   renderPerm(s) {
     const list = s && !s.ended ? s.pendingPermissions || [] : [];
@@ -186,6 +217,7 @@ export class Panel {
     // headless: no TUI dialog to answer by accident, so a prompt sent while waiting just queues as the next turn
     const off = !!s.ended, hl = isHeadless(s), waiting = s.state === 'waiting' && !hl;
     this.renderPerm(s);
+    this.renderMode(s);
     const asking = hl && s.state === 'waiting' && s.pendingPermissions?.length > 0;
     this.input.disabled = off;
     this.sendBtn.disabled = off || waiting || !!this.sending;
