@@ -11,7 +11,16 @@ const URL_ = `http://127.0.0.1:${PORT}/hook`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms / SPEED));
 
+// Sessions that got a SessionStart but no SessionEnd yet. When the demo is stopped
+// (Ctrl+C, kill, or the terminal closing) every one of them is sent home, so the
+// office is not left with employees that will never clock out.
+const active = new Map(); // session_id -> base event fields
+let stopping = false;
+
 async function send(ev) {
+  if (stopping && ev.hook_event_name !== 'SessionEnd') return;
+  if (ev.hook_event_name === 'SessionStart') active.set(ev.session_id, { session_id: ev.session_id, cwd: ev.cwd, transcript_path: ev.transcript_path, permission_mode: ev.permission_mode });
+  if (ev.hook_event_name === 'SessionEnd') active.delete(ev.session_id);
   try {
     await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ev) });
     const t = ev.tool_name ? ` ${ev.tool_name}` : '';
@@ -55,9 +64,37 @@ function script(sid, cwd, agentId, finalText, model = 'claude-fable-5-1') {
 }
 
 async function play(steps) {
-  for (const [delay, ev] of steps) { await sleep(delay); await send(ev); }
+  for (const [delay, ev] of steps) {
+    await sleep(delay);
+    if (stopping) return;
+    await send(ev);
+  }
 }
 
+async function shutdown(signal) {
+  if (stopping) return;
+  stopping = true;
+  const ids = [...active.keys()];
+  if (ids.length) console.log(`\n${signal}: sending ${ids.length} demo session(s) home`);
+  await Promise.all(ids.map((id) => send({ ...active.get(id), hook_event_name: 'SessionEnd', reason: 'demo_stopped' })));
+  process.exit(0);
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+  try { process.on(sig, () => shutdown(sig)); } catch { /* not every signal exists on every platform */ }
+}
+
+// A previous demo that was killed hard (closed terminal, taskkill) never sent its
+// SessionEnd events; send those leftovers home before starting fresh ones.
+async function sweepLeftovers() {
+  let snap;
+  try { snap = await (await fetch(`http://127.0.0.1:${PORT}/state`)).json(); } catch { return; }
+  const stale = Object.values(snap.sessions || {}).filter((s) => /^demo-/.test(s.id) && !s.ended);
+  if (!stale.length) return;
+  console.log(`sending ${stale.length} leftover demo session(s) from an earlier run home`);
+  await Promise.all(stale.map((s) => send({ session_id: s.id, cwd: s.cwd, transcript_path: `/tmp/${s.id}.jsonl`, permission_mode: 'default', hook_event_name: 'SessionEnd', reason: 'demo_restarted' })));
+}
+
+await sweepLeftovers();
 let round = 0;
 do {
   const tag = round ? `-${round}` : '';
@@ -72,4 +109,4 @@ do {
   ]);
   round++;
   if (LOOP) await sleep(4000);
-} while (LOOP);
+} while (LOOP && !stopping);
