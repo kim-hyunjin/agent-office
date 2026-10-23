@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WEB_DIR } from './config.mjs';
+import { decode } from './util.mjs';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -15,19 +16,21 @@ const MIME = {
   '.ttf': 'font/ttf',
 };
 
+/** 200 + headers (+ Content-Length when `size` is known), then stream `file`; a read error just drops the connection. */
+export function sendFile(res, file, size, headers) {
+  res.writeHead(200, size == null ? headers : { ...headers, 'Content-Length': size });
+  fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
+}
+
 export function serveStatic(urlPath, res) {
-  let rel = decodeURIComponent(urlPath.replace(/^\/web\//, '/'));
+  let rel = decode(urlPath.replace(/^\/web\//, '/'));
+  if (rel === null) return false; // malformed %-escape names no file we have → 404
   if (rel === '/' || rel === '') rel = '/index.html';
   const file = path.normalize(path.join(WEB_DIR, rel));
   if (!file.startsWith(WEB_DIR + path.sep)) { res.writeHead(403); res.end('forbidden'); return true; }
   let st;
   try { st = fs.statSync(file); } catch { return false; }
   if (!st.isFile()) return false;
-  res.writeHead(200, {
-    'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-    'Content-Length': st.size,
-    'Cache-Control': 'no-cache',
-  });
-  fs.createReadStream(file).pipe(res);
+  sendFile(res, file, st.size, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
   return true;
 }

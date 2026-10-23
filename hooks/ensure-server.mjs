@@ -5,17 +5,14 @@
 //   PAWGENTS_OFFICE_AUTOSTART=0 disables starting the server from the hook.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { readEvent, forward } from './send.mjs';
+import { PORT, DATA_DIR, BASE_URL } from '../server/config.mjs';
+import { readEvent, forward, log } from './send.mjs';
 
-const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || 17777);
-const DATA_DIR = process.env.PAWGENTS_OFFICE_DATA || path.join(os.homedir(), '.pawgents-office');
-const URL = `http://127.0.0.1:${PORT}`;
 const SERVER = path.resolve(import.meta.dirname, '../server/index.mjs');
 
 async function healthy() {
-  try { return (await fetch(`${URL}/healthz`, { signal: AbortSignal.timeout(500) })).ok; } catch { return false; }
+  try { return (await fetch(`${BASE_URL}/healthz`, { signal: AbortSignal.timeout(500) })).ok; } catch { return false; }
 }
 
 // Concurrent starts are fine: the loser exits on EADDRINUSE and the winner writes server.pid.
@@ -39,8 +36,8 @@ function openBrowser(url) {
 
 if (process.argv.includes('--open')) {
   if (await ensureServer()) {
-    openBrowser(URL);
-    console.log(`pawgents-office is running at ${URL}`);
+    openBrowser(BASE_URL);
+    console.log(`pawgents-office is running at ${BASE_URL}`);
   } else {
     console.log(`pawgents-office failed to start on port ${PORT}. See ${path.join(DATA_DIR, 'server.log')}`);
   }
@@ -49,6 +46,6 @@ if (process.argv.includes('--open')) {
     const ev = await readEvent();
     if (process.env.PAWGENTS_OFFICE_AUTOSTART !== '0') await ensureServer();
     if (ev) await forward(ev);
-  } catch { /* never fail the hook */ }
+  } catch (e) { log(`ensure-server: ${e.message}`); } // never fail the hook
 }
 process.exit(0);

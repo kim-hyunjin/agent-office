@@ -41,6 +41,7 @@ claude                 # 아무 터미널, 아무 레포에서 평소처럼 사�
 ```bash
 pnpm demo              # Claude 없이 가짜 직원 2명으로 화면 확인
 pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
+pnpm test              # node --test: 공유 상수·레이아웃 순수 함수 테스트
 ```
 
 `pnpm`이 없으면 `node server/index.mjs`, `node hooks/install.mjs` 처럼 직접 실행해도 됩니다.
@@ -194,14 +195,19 @@ pnpm uninstall-hooks   # hook 제거 (settings.json 원복)
 ## 구조
 
 ```
-server/   index.mjs(HTTP 라우팅) · reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
+server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · http.mjs(요청 처리 공용) · skins.mjs(스킨 id·검증)
+          reducer.mjs(이벤트→상태) · store.mjs(모델/사무실/책상/영속화) · repo.mjs(저장소 판별)
           registry.mjs(세션 레지스트리 폴링) · transcript.mjs(transcript tail) · orca.mjs(Orca CLI 연동)
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
-web/      index.html · style.css · office.js(진입점) · render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
-          layout.js(배치 데이터·검증, 서버와 공유) · editor.js(배치 편집) · panel.js · roster.js(직원 목록)
+web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루프) · world.js(상태·자리·동선) · feed.js(티커) · viewport.js(배율·줌·리핏)
+          render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
+          layout.js(배치 데이터·검증, 서버와 공유) · limits.js(이름·인원·스킨 한도, 서버와 공유) · editor.js(배치 편집)
+          layout-edit.js(배치 편집 연산, DOM 없음) · editor-draw.js(편집 오버레이) · panel.js · roster.js(직원 목록)
           launcher.js(새 직원) · legend.js(모델 안내) · reply.js(전체 답변 창) · markdown.js
+          api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미, 상태 이름·색·툴 아이콘)
 hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
+test/     shared.test.mjs(공유 상수·레이아웃 순수 함수 테스트)
 commands/ open.md · stop.md (플러그인 슬래시 명령)
 .claude-plugin/  plugin.json · marketplace.json
 ```

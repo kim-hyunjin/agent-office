@@ -6,24 +6,32 @@ import {
 } from './config.mjs';
 import { debounce, safeJsonParse } from './util.mjs';
 import { repoOf } from './repo.mjs';
+import { SKIN_ID, hasSkin, newSkinId } from './skins.mjs';
 import { DEFAULT_OFFICE, cloneOffice, deskCount, normalize, validate } from '../web/layout.js';
 
-export class RingBuffer {
+class RingBuffer {
   constructor(n) { this.n = n; this.buf = []; }
   push(x) { this.buf.push(x); if (this.buf.length > this.n) this.buf.shift(); }
   toArray() { return this.buf.slice(); }
   last(k) { return this.buf.slice(-k); }
 }
 
-export const STATES = ['idle', 'thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working', 'waiting', 'offduty'];
 const BUSY_STATES = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 export const isBusyState = (s) => BUSY_STATES.has(s);
 export const CAT_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku', 'other'];
-export const SKIN_ID = /^[a-z0-9]{10}$/;
 // a built-in breed (the list itself lives in web/sprites.js) or an uploaded skin, 'skin:<id>'
 export const BREED_KEY = /^([a-z]{2,24}|skin:[a-z0-9]{10})$/;
 export const DEFAULT_OFFICE_ID = 'default';
 const newOffice = (id, name, repos, layout = cloneOffice(DEFAULT_OFFICE)) => ({ id, name, repos, layout });
+
+/** Clock out a session or subagent (callers check `ended` first). */
+function markEnded(ent) {
+  ent.ended = true;
+  ent.endedAt = Date.now();
+  ent.state = 'offduty';
+  ent.stateSince = ent.endedAt;
+  ent.currentTool = null;
+}
 
 export class Store {
   constructor({ stateFile = STATE_FILE, skinsDir = SKINS_DIR } = {}) {
@@ -42,30 +50,42 @@ export class Store {
   // ---- persistence -------------------------------------------------------
   load() {
     const data = safeJsonParse(fs.existsSync(this.stateFile) ? fs.readFileSync(this.stateFile, 'utf8') : '');
+    this.loadDesks(data?.desks);
+    this.loadSkins(data?.skins);
+    this.loadCats(data?.cats); // after skins: a pick of a skin that is gone is dropped
+    this.loadOffices(data?.offices, data?.together);
+  }
+  loadDesks(desks) {
     const now = Date.now();
     this.desks = {};
-    for (const [id, v] of Object.entries(data?.desks || {})) {
+    for (const [id, v] of Object.entries(desks || {})) {
       if (v && typeof v.desk === 'number' && now - (v.at || 0) < DESK_MEMORY_MS) this.desks[id] = v;
     }
+  }
+  loadSkins(skins) {
     this.skins = [];
-    for (const k of Array.isArray(data?.skins) ? data.skins : []) {
-      if (SKIN_ID.test(k?.id) && !this.skins.some((x) => x.id === k.id) && fs.existsSync(this.skinFile(k.id))) {
+    for (const k of Array.isArray(skins) ? skins : []) {
+      if (SKIN_ID.test(k?.id) && !hasSkin(this.skins, k.id) && fs.existsSync(this.skinFile(k.id))) {
         this.skins.push({ id: k.id, name: String(k.name || '스킨'), cellW: k.cellW, cellH: k.cellH });
       }
     }
+  }
+  loadCats(cats) {
     this.cats = {};
-    for (const [fam, breed] of Object.entries(data?.cats || {})) {
+    for (const [fam, breed] of Object.entries(cats || {})) {
       if (CAT_FAMILIES.includes(fam) && BREED_KEY.test(breed) && this.hasBreed(breed)) this.cats[fam] = breed;
     }
+  }
+  loadOffices(list, together) {
     const offices = [];
-    for (const o of Array.isArray(data?.offices) ? data.offices : []) {
+    for (const o of Array.isArray(list) ? list : []) {
       if (typeof o?.id !== 'string' || offices.some((x) => x.id === o.id) || !Array.isArray(o.repos)) continue;
       const layout = validate(normalize(o.layout)).length ? cloneOffice(DEFAULT_OFFICE) : normalize(o.layout); // a broken layout falls back to the default
       offices.push(newOffice(o.id, String(o.name || '사무실'), o.repos.filter((r) => typeof r === 'string'), layout));
     }
     if (!offices.some((o) => o.id === DEFAULT_OFFICE_ID)) offices.unshift(newOffice(DEFAULT_OFFICE_ID, '사무실', ['default']));
     this.offices = offices;
-    this.together = offices.some((o) => o.id === data?.together) ? data.together : null;
+    this.together = offices.some((o) => o.id === together) ? together : null;
   }
   saveNow() {
     try {
@@ -91,12 +111,10 @@ export class Store {
   emitSettings() { this.emit('settings', { cats: this.cats, skins: this.skins }); }
   skinFile(id) { return path.join(this.skinsDir, `${id}.png`); }
   /** Skins must exist; built-in breed keys are checked by the browser (unknown ones draw the default). */
-  hasBreed(breed) { return !breed.startsWith('skin:') || this.skins.some((k) => `skin:${k.id}` === breed); }
+  hasBreed(breed) { return !breed.startsWith('skin:') || hasSkin(this.skins, breed.slice(5)); }
   /** Store an uploaded sprite sheet (already validated) and offer it to every browser. */
   addSkin({ name, cellW, cellH }, png) {
-    let id;
-    do id = Array.from({ length: 10 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
-    while (this.skins.some((k) => k.id === id));
+    const id = newSkinId(this.skins);
     fs.mkdirSync(this.skinsDir, { recursive: true });
     fs.writeFileSync(this.skinFile(id), png);
     const skin = { id, name, cellW, cellH };
@@ -107,7 +125,7 @@ export class Store {
   }
   /** Delete a skin; families drawn with it go back to their default breed. */
   removeSkin(id) {
-    if (!this.skins.some((k) => k.id === id)) return false;
+    if (!hasSkin(this.skins, id)) return false;
     this.skins = this.skins.filter((k) => k.id !== id);
     for (const [fam, breed] of Object.entries(this.cats)) if (breed === `skin:${id}`) delete this.cats[fam];
     try { fs.unlinkSync(this.skinFile(id)); } catch { /* already gone */ }
@@ -281,11 +299,7 @@ export class Store {
   }
   endSession(s, reason = 'ended') {
     if (s.ended) return;
-    s.ended = true;
-    s.endedAt = Date.now();
-    s.state = 'offduty';
-    s.stateSince = s.endedAt;
-    s.currentTool = null;
+    markEnded(s);
     for (const a of s.subagents.values()) this.endSubagent(a);
     this.log(s, { ev: 'SessionEnd', text: reason });
   }
@@ -326,11 +340,7 @@ export class Store {
   }
   endSubagent(a) {
     if (a.ended) return;
-    a.ended = true;
-    a.endedAt = Date.now();
-    a.state = 'offduty';
-    a.stateSince = a.endedAt;
-    a.currentTool = null;
+    markEnded(a);
   }
 
   setState(ent, state) {

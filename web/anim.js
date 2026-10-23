@@ -1,6 +1,6 @@
 import { TILE } from './layout.js';
 
-export const SPEED = 64; // logical px per second (cats run)
+const SPEED = 64; // logical px per second (cats run)
 
 /** Advance an entity along its path. Returns true if it moved. */
 export function step(ent, dt) {
@@ -23,4 +23,3 @@ export function step(ent, dt) {
 }
 
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const lerp = (a, b, t) => a + (b - a) * t;

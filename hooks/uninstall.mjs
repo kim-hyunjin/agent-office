@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Removes pawgents-office hooks from ~/.claude/settings.json, leaving everything else intact.
-import { SETTINGS_FILE, isOurs, readSettings, backupSettings, writeSettings } from './_common.mjs';
+import { SETTINGS_FILE, isOurs, loadSettingsOrExit, commitSettings } from './_common.mjs';
 
-let settings;
-try { settings = readSettings(); } catch (e) { console.error(e.message); process.exit(1); }
+const settings = loadSettingsOrExit();
 
 let removed = 0;
 if (settings.hooks && typeof settings.hooks === 'object') {
@@ -23,7 +22,6 @@ if (settings.hooks && typeof settings.hooks === 'object') {
 }
 
 if (!removed) { console.log(`No pawgents-office hooks found in ${SETTINGS_FILE} — nothing to do.`); process.exit(0); }
-const bak = backupSettings();
-writeSettings(settings);
+const bak = commitSettings(settings);
 console.log(`Removed ${removed} pawgents-office hook entr${removed === 1 ? 'y' : 'ies'} from ${SETTINGS_FILE}`);
 if (bak) console.log(`  backup: ${bak}`);

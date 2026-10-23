@@ -1,19 +1,12 @@
 import { TILE, WALL_RISE } from './layout.js';
 import { drawReception, drawBox } from './tilemap.js';
 import { sprite, spriteSize, outline, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf } from './sprites.js';
+import { fmtTime } from './ui.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
   idle: '#1b1b24', offduty: '#1b1b24', thinking: '#263047', reading: '#2a2f3f', coding: '#2b6cff',
   terminal: '#0a120a', working: '#dfe6ee', searching: '#1e3a5f', delegating: '#3b4a7a', waiting: '#5a4a12',
-};
-export const STATE_LABEL = {
-  idle: '대기', thinking: '생각 중', reading: '읽는 중', coding: '코딩 중', terminal: '터미널', searching: '검색 중',
-  delegating: '위임 중', working: '작업 중', waiting: '응답 대기', offduty: '퇴근',
-};
-export const STATE_COLOR = {
-  idle: '#8e9aaf', thinking: '#a78bfa', reading: '#60a5fa', coding: '#3b82f6', terminal: '#22c55e', searching: '#06b6d4',
-  delegating: '#f59e0b', working: '#e5e7eb', waiting: '#fbbf24', offduty: '#6b7280',
 };
 const AUTO_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']);
 const BUBBLE_MS = 15000;
@@ -246,10 +239,6 @@ function drawEntity(g, geo, e, t, selected, hovered) {
     else if (state === 'waiting') drawGlyph(g, 'bang', gx + 2, gy - 3, t);
     else if (state === 'terminal' || (state === 'idle' && (data.bgTasks?.length || data.awaitingShell))) drawGlyph(g, 'term', gx - 1, gy - 4, t + e.seed);
     else if (act === 'nap') drawGlyph(g, 'zzz', gx + 4, gy - 2, t + e.seed);
-    else if (state === 'delegating' && stationKind === 'desk' && e.planeTo) {
-      const ph = ((t + e.seed) % 1600) / 1600;
-      drawGlyph(g, 'plane', e.x + 8 + (e.planeTo.x - e.x - 8) * ph, e.y - 2 + (e.planeTo.y - e.y + 2) * ph - Math.sin(ph * Math.PI) * 8, t);
-    }
   }
   if (!isAsst && e.phase !== 'leave') {
     if (data.permissionMode === 'acceptEdits') drawGlyph(g, 'check', e.x + ox - 6, e.y + oy + 1, t);
@@ -353,7 +342,7 @@ function drawHUD(ctx, S, world, now) {
   ctx.fillStyle = '#f3f4f6'; ctx.fillText(text, x0 + 7 * S, 7 * S);
   ctx.fillStyle = '#ffd166'; ctx.fillText(toggle, x0 + 7 * S + tw + 5 * S, 7 * S);
   world.hudBtn = { x: x0 / S, y: 2 - WALL_RISE, w: w / S, h: 10 }; // office px (the HUD hangs above the office origin)
-  const clock = new Date(now).toTimeString().slice(0, 8);
+  const clock = fmtTime(now);
   ctx.textAlign = 'right';
   const cw = ctx.measureText(clock).width + 6 * S;
   const cx = (world.view.geo.W - TILE) * S - 2 * S;

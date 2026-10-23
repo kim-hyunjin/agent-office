@@ -3,6 +3,7 @@ import path from 'node:path';
 
 export const PORT = Number(process.env.PAWGENTS_OFFICE_PORT || process.env.PORT || 17777);
 export const HOST = '127.0.0.1';
+export const BASE_URL = `http://${HOST}:${PORT}`;
 
 export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 export const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
@@ -36,5 +37,4 @@ export const TRANSCRIPT_POLL_MS = 2_000;
 export const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 export const STALE_TOOL_MS = 60_000;
 export const MAX_BODY_BYTES = 1024 * 1024;
-export const MAX_SKIN_BYTES = 512 * 1024; // decoded PNG; its base64 still fits in MAX_BODY_BYTES
 export const SSE_HEARTBEAT_MS = 15_000;

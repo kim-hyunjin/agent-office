@@ -3,7 +3,7 @@
 // fenced code, blockquotes, tables, rules, and inline code / bold / italic / strike / links.
 // Everything is HTML-escaped first, so agent text can never inject markup.
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+import { esc } from './ui.js';
 
 const FENCE = /^(\s*)(`{3,}|~{3,})\s*([^`\s]*)/;
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;

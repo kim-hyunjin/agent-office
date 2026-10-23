@@ -5,6 +5,8 @@
   --text: #e8eaf2;
   --dim: #9aa0b8;
   --accent: #ffd166;
+  --panel-w: 380px; /* #panel / #editor width; viewport.js reads it to size the office beside them */
+  --panel-ms: 220ms; /* panel slide + office refit; viewport.js re-rasterizes after it */
   --font: "Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -58,7 +60,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #tip { max-width: 380px; }
 
 #panel {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); z-index: 10;
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--panel-w), 100vw); z-index: 10;
   background: var(--panel); border-left: 1px solid #2f3352; box-shadow: -10px 0 40px rgba(0,0,0,0.4);
   display: flex; flex-direction: column; overflow: hidden; font-size: 13px;
 }
@@ -280,10 +282,10 @@ button:disabled { opacity: .5; cursor: default; }
 .md .warn { padding: 8px 12px; border-radius: 6px; background: rgba(248,113,113,0.12); color: #fca5a5; font-size: 13px; }
 
 /* ---- panel slide (no layout reflow: office scale is fixed, canvas only translates) ---- */
-#panel { transform: translateX(100%); visibility: hidden; transition: transform .22s ease, visibility 0s linear .22s; }
-#panel.open { transform: none; visibility: visible; transition: transform .22s ease; }
-#office.refit { transition: width .22s ease, height .22s ease; }
-#ticker { transition: right .22s ease; }
+#panel { transform: translateX(100%); visibility: hidden; transition: transform var(--panel-ms) ease, visibility 0s linear var(--panel-ms); }
+#panel.open { transform: none; visibility: visible; transition: transform var(--panel-ms) ease; }
+#office.refit { transition: width var(--panel-ms) ease, height var(--panel-ms) ease; }
+#ticker { transition: right var(--panel-ms) ease; }
 @media (prefers-reduced-motion: reduce) { #panel, #panel.open, #office.refit, #ticker { transition: none; } }
 
 #p-quit {
@@ -295,7 +297,7 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* ---- layout editor ---- */
 #editor {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); z-index: 11;
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--panel-w), 100vw); z-index: 11;
   background: var(--panel); border-left: 1px solid #2f3352; box-shadow: -10px 0 40px rgba(0,0,0,0.4);
   display: flex; flex-direction: column; font-size: 13px;
 }

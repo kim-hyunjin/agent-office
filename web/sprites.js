@@ -156,7 +156,6 @@ export function breedPalette(breed, variant, kind = 'employee', fam = null) {
 }
 
 // The cat sheets themselves (string art per pose) live in cats.js.
-export { SHEETS };
 const { employee: E } = SHEETS;
 
 const cache = new Map();
@@ -189,7 +188,7 @@ export function sprite(pal, anim, frame) {
 
 const outlines = new WeakMap(); // sprite canvas -> Map(color -> canvas)
 
-export const OUTLINE_W = 2;
+const OUTLINE_W = 2;
 
 /**
  * An OUTLINE_W-px outline (world pixels) hugging the sprite's opaque pixels, on a canvas that much larger each way.

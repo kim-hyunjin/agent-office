@@ -1,33 +1,22 @@
-// "모델 안내" dialog: which cat stands for which model, opened from the canvas button in the bottom-right corner
-// (render.js drawLegend). Each model row has a breed picker; the choice is saved on the server and pushed to
-// every open office (office.js applies it). Also shows the kittens (subagents) and the receptionist, and manages
-// uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
+// "모델 안내" dialog: which cat stands for which model, opened from the #t-legend toolbar button. Each model row has a
+// breed picker; the choice is saved on the server and pushed to every open office (office.js applies it). Also shows
+// the kittens (subagents) and the receptionist, and manages uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
 import {
-  FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, spriteSize, breedPalette, RECEPTIONIST_PAL,
+  FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, breedPalette, RECEPTIONIST_PAL,
   SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate, skinScale,
 } from './sprites.js';
-import { esc } from './panel.js';
+import { post } from './api.js';
+import { esc, pic, downloadBlob, bindDialogClose } from './ui.js';
+import { MAX_NAME_CHARS, MAX_SKIN_BYTES, MIN_CELL, MAX_CELL, isCell, skinGridError } from './limits.js';
 
 const dlg = document.getElementById('legend');
 const body = document.getElementById('lg-body');
 const MONITOR = { 'wide-gold': '금색 와이드 모니터', silver: '실버 모니터', normal: '일반 모니터', laptop: '노트북' };
 const ZOOM = 2;
-const MAX_SKIN_BYTES = 512 * 1024; // same limit as the server (config.mjs)
 
-document.getElementById('lg-close').addEventListener('click', () => dlg.close());
-dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+bindDialogClose(dlg, document.getElementById('lg-close'));
 
-/** A drawable (sprite frame or skin frame) as a scaled-up <canvas>, sized by its world size. */
-function pic(img, zoom = ZOOM) {
-  const { w, h } = spriteSize(img);
-  const c = document.createElement('canvas');
-  c.width = Math.round(w * zoom); c.height = Math.round(h * zoom);
-  const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  g.drawImage(img, 0, 0, c.width, c.height);
-  return c;
-}
-const cat = (pal, anim = 'idle') => pic(sprite(pal, anim, 0));
+const cat = (pal, anim = 'idle') => pic(sprite(pal, anim, 0), ZOOM);
 
 /** Pictures for a breed or skin: every coat of a breed, or a skin's seated and walking frames. */
 function looks(breed, kind = 'employee') {
@@ -45,12 +34,6 @@ function row(cats, title, lines) {
   text.innerHTML = `<b>${title}</b>${lines.map((l) => `<div class="dim">${l}</div>`).join('')}`;
   li.append(pics, text);
   return li;
-}
-
-async function post(url, data) {
-  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-  return r.json();
 }
 
 /** Breed <select> for a model family (uploaded skins in their own group); picking one asks the server to save it. */
@@ -163,19 +146,15 @@ function skinRow(s) {
   return li;
 }
 
-async function downloadTemplate() {
-  const url = URL.createObjectURL(await skinTemplate());
-  Object.assign(document.createElement('a'), { href: url, download: 'pawgents-skin-template.png' }).click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+async function downloadTemplate() { downloadBlob(await skinTemplate(), 'pawgents-skin-template.png'); }
 
 /** A cell size the sheet divides into evenly, with a sensible row count; 16 if nothing fits. */
 function guessCell(w, h) {
-  return [16, 32, 24, 48, 64, 12, 8].find((c) => w % c === 0 && h % c === 0 && h / c >= 2 && h / c <= SKIN_ROWS.length && w / c <= 16) || 16;
+  return [16, 32, 24, 48, 64, 12, 8].find((c) => !skinGridError(w, h, c, c)) || 16;
 }
 
 async function pickFile(file) {
-  const name = file.name.replace(/\.png$/i, '').slice(0, 30) || '스킨';
+  const name = file.name.replace(/\.png$/i, '').slice(0, MAX_NAME_CHARS) || '스킨';
   try {
     if (file.size > MAX_SKIN_BYTES) throw new Error(`파일이 너무 큽니다(최대 ${MAX_SKIN_BYTES / 1024}KB).`);
     const bmp = await createImageBitmap(file);
@@ -188,15 +167,6 @@ async function pickFile(file) {
   refreshLegend();
 }
 
-/** What's wrong with the draft's grid, or null. Mirrors the server's checks so most mistakes show before uploading. */
-function gridError(d) {
-  const { width: w, height: h } = d.bmp;
-  if (w % d.cellW || h % d.cellH) return `이미지 크기(${w}×${h})가 칸 크기로 나누어떨어지지 않아요.`;
-  if (h / d.cellH < 2 || h / d.cellH > SKIN_ROWS.length) return `줄 수는 2–${SKIN_ROWS.length}줄이어야 해요(지금 ${h / d.cellH}줄).`;
-  if (w / d.cellW > 16) return `한 줄은 16칸까지예요(지금 ${w / d.cellW}칸).`;
-  return null;
-}
-
 function draftForm() {
   const d = draft;
   const box = document.createElement('div');
@@ -207,8 +177,8 @@ function draftForm() {
     return box;
   }
   box.innerHTML = `<div class="fields">
-      <label>이름 <input name="name" maxlength="30" value="${esc(d.name)}"></label>
-      <label>칸 <input name="cellW" type="number" min="4" max="64" value="${d.cellW}"> × <input name="cellH" type="number" min="4" max="64" value="${d.cellH}"> px</label>
+      <label>이름 <input name="name" maxlength="${MAX_NAME_CHARS}" value="${esc(d.name)}"></label>
+      <label>칸 <input name="cellW" type="number" min="${MIN_CELL}" max="${MAX_CELL}" value="${d.cellW}"> × <input name="cellH" type="number" min="${MIN_CELL}" max="${MAX_CELL}" value="${d.cellH}"> px</label>
       <span class="dim">${d.bmp.width}×${d.bmp.height}</span>
     </div>
     <ol class="frames"></ol>
@@ -219,7 +189,8 @@ function draftForm() {
   // preview: each row's frames as the office will cut them, or what's missing
   const preview = () => {
     d.name = nameIn.value; d.cellW = Number(wIn.value) || 0; d.cellH = Number(hIn.value) || 0;
-    let err = d.cellW >= 4 && d.cellH >= 4 && d.cellW <= 64 && d.cellH <= 64 ? gridError(d) : '칸 크기는 4–64px이어야 해요.';
+    // same grid checks as the server, so most mistakes show before uploading
+    let err = isCell(d.cellW) && isCell(d.cellH) ? skinGridError(d.bmp.width, d.bmp.height, d.cellW, d.cellH) : `칸 크기는 ${MIN_CELL}–${MAX_CELL}px이어야 해요.`;
     const rows = err ? {} : sliceSheet(d.bmp, d.cellW, d.cellH);
     if (!err && (!rows.idle || !rows.walk)) err = '첫 줄(앉아 있기)과 둘째 줄(걷기)에 그림이 있어야 해요.';
     frames.replaceChildren(...(err ? [] : SKIN_ROWS.map((anim) => {

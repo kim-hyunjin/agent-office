@@ -1,11 +1,13 @@
 // Office layouts as data. An office is a w×h grid of 16px tiles holding rooms (rectangles; walls are generated
 // around them) and furniture items. compile() turns one into the geometry the office runs on: walls, doors,
 // walkability, desks, meeting rooms and every spot a cat can go. Pure ESM with no DOM, so the server imports it too.
+import { MAX_NAME_CHARS } from './limits.js';
+
 export const TILE = 16;
 /** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
 export const WALL_RISE = TILE;
 /** 2: play rooms have walls by default (v1 play rooms without a `walls` field stay open), the front door has a side. */
-export const LAYOUT_VERSION = 2;
+const LAYOUT_VERSION = 2;
 export const MIN_W = 20, MIN_H = 14, MAX_W = 64, MAX_H = 40;
 
 /** Room types: floor colors live in tilemap.js. A room's walls are glass when `glass` (default: meeting rooms). */
@@ -118,10 +120,10 @@ export function normalize(o) {
     items: Array.isArray(o.items) ? o.items.map((it) => pick(it, ['id', 'kind', 'x', 'y'])) : o.items,
   };
 }
-const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
+export const inRect = (r, x, y) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+export const hasWalls = (r) => (ROOM_TYPES[r.type]?.walls ?? true) && r.walls !== false;
 const isGlass = (r) => r.glass ?? ROOM_TYPES[r.type]?.glass ?? false;
-export const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
+const itemSize = (it) => ITEM_KINDS[it.kind] || { w: 1, h: 1 };
 export const itemRect = (it) => ({ x: it.x, y: it.y, ...(({ w, h }) => ({ w, h }))(itemSize(it)) });
 /** The ring of tiles around a room, where its walls stand. */
 export const ringRect = (r) => ({ x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 });
@@ -315,7 +317,7 @@ export function validate(office) {
     if (typeof r?.id !== 'string' || !r.id || ids.has(r.id)) { err('방 id가 잘못되었습니다.'); continue; }
     ids.add(r.id);
     if (!ROOM_TYPES[r.type]) { err(`알 수 없는 방 종류: ${r.type}`); continue; }
-    if (typeof r.name !== 'string' || r.name.length > 30) err('방 이름은 30자 이하여야 합니다.');
+    if (typeof r.name !== 'string' || r.name.length > MAX_NAME_CHARS) err(`방 이름은 ${MAX_NAME_CHARS}자 이하여야 합니다.`);
     if (![r.x, r.y, r.w, r.h].every(int) || r.w < 2 || r.h < 2 || r.x < 1 || r.y < 1 || r.x + r.w > w - 1 || r.y + r.h > h - 1) { err(`${r.name || '방'}이(가) 사무실 밖으로 나갔습니다.`, cells(r)); continue; }
     if (!Array.isArray(r.doors)) { err('문 데이터가 잘못되었습니다.'); continue; }
     const g = ringRect(r);

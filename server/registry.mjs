@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { SESSIONS_DIR, PROJECTS_DIR, STALE_TOOL_MS } from './config.mjs';
-import { isPidAlive, safeJsonParse, projectDirName } from './util.mjs';
+import { isPidAlive, safeJsonParse, projectDirName, readSafe } from './util.mjs';
 import { isBusyState } from './store.mjs';
 
 /**
@@ -55,8 +55,4 @@ export function pollRegistry(store) {
       store.emitSession(s);
     }
   }
-}
-
-function readSafe(file) {
-  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
 }
