@@ -15,6 +15,7 @@ import { fileDiff } from './diff.mjs';
 import { scheduleFileSync } from './files.mjs';
 import { listWorktrees, sendPrompt, closeSession, launchClaude, createWorktreeWithClaude } from './backends/orca.mjs';
 import { backends } from './backends/index.mjs';
+import { listGitWorktrees, repoRoots } from './backends/git.mjs';
 
 /** @returns {Array<[string, string | RegExp, (ctx: { req, res, url: URL, params: string[] }) => unknown]>} */
 export function makeRoutes({ store, sse }) {
@@ -102,6 +103,14 @@ export function makeRoutes({ store, sse }) {
         await closeSession(store, s, { force });
         console.log(`[web] close${force ? ' (force)' : ''} → ${s.name} (${s.id.slice(0, 8)})`);
         json(res, 200, { ok: true });
+      } catch (e) { orcaError(res, e); }
+    }],
+    ['GET', '/worktrees', async ({ res, url }) => {
+      const backend = url.searchParams.get('backend') || (await backends()).default;
+      try {
+        if (backend === 'orca') json(res, 200, { worktrees: await listWorktrees() });
+        else if (backend === 'headless') json(res, 200, { worktrees: await listGitWorktrees(repoRoots(store)) });
+        else json(res, 400, { error: '알 수 없는 백엔드입니다.' });
       } catch (e) { orcaError(res, e); }
     }],
     ['GET', '/orca/worktrees', async ({ res }) => {
