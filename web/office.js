@@ -1,6 +1,5 @@
-import { WALL_RISE, DEFAULT_OFFICE, inRect } from './layout.js';
+import { DEFAULT_OFFICE, inRect } from './layout.js';
 import { paletteFor, familyOf, FAMILIES, setBreedChoices, setSkins, onSkinLoad, sprite } from './sprites.js';
-import { clamp } from './anim.js';
 import { render, STATE_LABEL, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
 import { openLegend, refreshLegend } from './legend.js';
@@ -9,6 +8,7 @@ import { openLauncher } from './launcher.js';
 import { Panel, awaitingBg, bgSummary } from './panel.js';
 import { post } from './api.js';
 import { esc, pic, storage } from './ui.js';
+import { S, initViewport, resize, refit, officeXY, rosterAnchor } from './viewport.js';
 import { feedFrom, renderFeed } from './feed.js';
 import { world, applyLayout, here, syncSession, exitSession, dropCats, retarget, fadeStep, entAt, placeOf } from './world.js';
 
@@ -26,88 +26,9 @@ const panel = new Panel(document.getElementById('panel'), {
   onClose: () => { world.selectedKey = null; history.replaceState(null, '', location.pathname + location.search); refit(); },
 });
 
-let S = 3;
-
-const PANEL_W = 380; // keep in sync with #panel width in style.css
-const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit transitions
-// Width the open panel takes from the office. On narrow windows the panel just covers it.
-const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
-
-// Whole-number zoom, like pixel-art games: every art pixel is the same size on screen. Fit: at least MIN_SCALE, more
-// when the window has room; an office bigger than the window scrolls instead of shrinking its pixels. The −/+ buttons
-// pin a zoom instead (remembered per browser); the zoom button between them goes back to fitting.
-const MIN_SCALE = 2, MAX_SCALE = 8;
-let zoom = null; // pinned scale, or null: fit the window
-{ const z = Math.round(Number(storage.get('pawgents.zoom'))); zoom = z >= 1 ? Math.min(z, MAX_SCALE) : null; }
-function fitScale() {
-  if (zoom) return zoom;
-  const ticker = document.getElementById('ticker');
-  const availW = window.innerWidth - 16 - panelRoom();
-  const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - barEl.offsetHeight;
-  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H)), MIN_SCALE, MAX_SCALE);
-}
-const zoomBtn = document.getElementById('t-zoom');
-function setZoom(z) {
-  zoom = z ? clamp(z, 1, MAX_SCALE) : null;
-  if (zoom) storage.set('pawgents.zoom', zoom); else storage.remove('pawgents.zoom');
-  resize();
-}
-document.getElementById('t-zoom-out').addEventListener('click', () => setZoom(S - 1));
-document.getElementById('t-zoom-in').addEventListener('click', () => setZoom(S + 1));
-zoomBtn.addEventListener('click', () => setZoom(null));
-function showZoom() {
-  zoomBtn.textContent = `${S}×`;
-  zoomBtn.classList.toggle('pinned', !!zoom);
-  zoomBtn.title = zoom ? '눌러서 창 크기에 맞추기' : '창 크기에 맞춘 배율';
-  document.getElementById('t-zoom-out').disabled = S <= 1;
-  document.getElementById('t-zoom-in').disabled = S >= MAX_SCALE;
-}
-
-/** The ticker (bottom) and the panel (right) float over the page: pad the page so the office can scroll out from under them. */
-function placeTicker() {
-  const ticker = document.getElementById('ticker'), side = panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0;
-  ticker.style.right = `${side}px`;
-  stageEl.style.paddingBottom = `${(ticker.hidden ? 0 : ticker.offsetHeight) + 4}px`;
-  stageEl.style.paddingRight = `${side + 4}px`;
-}
-
-/** Fit the office to the window at once (backing store + CSS size). */
-function resize() {
-  clearTimeout(refitTimer);
-  canvas.classList.remove('refit');
-  S = fitScale();
-  canvas.width = Math.round(world.view.geo.W * S); canvas.height = Math.round(world.view.geo.VIEW_H * S);
-  canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
-  barEl.style.width = canvas.style.width;
-  toolsEl.classList.toggle('off', editor.isOpen); // the editor has its own buttons
-  showZoom();
-  placeTicker();
-}
-
-/**
- * Panel opened/closed: ease the CSS size toward the new fit (left edge stays put while it grows
- * or shrinks), then re-rasterize at that size so pixels and text are crisp again.
- */
-let refitTimer = null;
-function refit() {
-  placeTicker();
-  const s = fitScale();
-  if (s === S && !canvas.classList.contains('refit')) return;
-  canvas.classList.add('refit');
-  canvas.style.width = `${Math.round(world.view.geo.W * s)}px`; canvas.style.height = `${Math.round(world.view.geo.VIEW_H * s)}px`;
-  barEl.style.width = canvas.style.width;
-  clearTimeout(refitTimer);
-  refitTimer = setTimeout(resize, PANEL_ANIM_MS + 20);
-}
-window.addEventListener('resize', resize);
+initViewport({ canvas, barEl, toolsEl, stageEl, sideOpen: () => panel.isOpen || editor.isOpen, editorOpen: () => editor.isOpen });
 const editor = new Editor({ world, canvas, officeXY, onResize: () => resize() });
 applyLayout(DEFAULT_OFFICE); resize();
-
-/** Pointer position in office (unscaled) pixels; CSS size can differ from the backing store mid-refit. */
-function officeXY(ev) {
-  const k = canvas.width / (canvas.clientWidth || canvas.width);
-  return [(ev.offsetX * k) / S, (ev.offsetY * k) / S - WALL_RISE];
-}
 
 const refreshLists = () => { roster.update(world); renderTabs(); };
 function upsertSession(s, seated = false) {
@@ -279,11 +200,6 @@ const roster = new Roster(document.getElementById('roster'), {
     return e && e.station?.kind !== 'desk' ? placeOf(e) : '';
   },
 });
-/** Viewport position just under the HUD's left edge. */
-function rosterAnchor() {
-  const r = canvas.getBoundingClientRect(), k = r.width / canvas.width, b = world.hudBtn;
-  return { left: r.left + b.x * S * k, top: r.top + (b.y + b.h + WALL_RISE + 2) * S * k };
-}
 function toggleRoster() {
   roster.toggle(world, rosterAnchor());
   world.rosterOpen = roster.isOpen;
