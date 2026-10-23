@@ -1,19 +1,8 @@
-import { STATE_LABEL, STATE_COLOR } from './render.js';
 import { FAMILIES, familyOf } from './sprites.js';
 import { openReply, refreshReply } from './reply.js';
 import { api, post, closeSession } from './api.js';
-import { esc, fmtTime, setMsg } from './ui.js';
+import { esc, fmtTime, setMsg, ICON, EV_ICON, MODE_LABEL, BUSY, STATE_LABEL, STATE_COLOR, awaitingBg, bgSummary, toolText, thinkingFresh } from './ui.js';
 
-export const ICON = {
-  Read: '📖', Grep: '🔍', Glob: '🔍', LS: '📂', Edit: '✏️', Write: '✏️', MultiEdit: '✏️', NotebookEdit: '✏️',
-  Bash: '💻', WebFetch: '🌐', WebSearch: '🌐', Agent: '🤝', Task: '🤝', AskUserQuestion: '❓', Skill: '🧩', TodoWrite: '📝',
-};
-export const EV_ICON = {
-  SessionStart: '🚪', SessionEnd: '🚪', UserPromptSubmit: '🗣️', Stop: '💬', PermissionRequest: '✋', Notification: '🔔',
-  SubagentStart: '🧢', SubagentStop: '🧢', PostToolUseFailure: '⚠️', PreModelSwitch: '🔁', PostModelSwitch: '🔁',
-};
-const MODE_LABEL = { plan: '계획', auto: '자동', bypassPermissions: '자동 (bypass)', dontAsk: '자동 (dontAsk)', acceptEdits: '편집 승인', default: '기본' };
-export const BUSY = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read']);
 
@@ -194,7 +183,7 @@ export class Panel {
     pr.textContent = s.lastPrompt || '';
     pr.hidden = !s.lastPrompt;
     const th = q('#p-thinking');
-    const freshThinking = s.lastThinking && now - s.lastThinkingAt < 3 * 60_000 && s.state !== 'idle';
+    const freshThinking = thinkingFresh(s, now) && s.state !== 'idle';
     th.textContent = freshThinking ? s.lastThinking : '';
     th.hidden = !freshThinking;
 
@@ -202,9 +191,9 @@ export class Panel {
     const live = (s.subagents || []).filter((a) => !a.ended);
     ag.innerHTML = live.map((a) => `<div class="agent" style="--c:${STATE_COLOR[a.state] || '#888'}">
         <div class="agent-hd">🧢 <b>${esc(a.type || 'agent')}</b>${a.description ? ' · ' + esc(a.description) : ''} <em>${esc(STATE_LABEL[a.state] || a.state)}</em> <span class="dim">툴 ${a.toolCount || 0}회</span></div>
-        ${a.currentTool ? `<div class="agent-tool">${esc(a.currentTool.name)}${a.currentTool.target ? ' · ' + esc(a.currentTool.target) : ''}${a.currentTool.detail ? ` <span class="dim">— ${esc(a.currentTool.detail)}</span>` : ''}</div>` : ''}
+        ${a.currentTool ? `<div class="agent-tool">${esc(toolText(a.currentTool))}${a.currentTool.detail ? ` <span class="dim">— ${esc(a.currentTool.detail)}</span>` : ''}</div>` : ''}
         ${a.task ? `<div class="agent-task" title="${esc(a.task)}">${esc(a.task)}</div>` : ''}
-        ${a.lastThinking && now - a.lastThinkingAt < 3 * 60_000 ? `<div class="agent-think">💭 ${esc(a.lastThinking)}</div>` : ''}
+        ${thinkingFresh(a, now) ? `<div class="agent-think">💭 ${esc(a.lastThinking)}</div>` : ''}
       </div>`).join('');
     ag.hidden = !live.length;
 
@@ -256,18 +245,6 @@ export class Panel {
       return `<li class="${cls}"><time>${fmtTime(e.t)}</time><span class="ic">${icon}</span><span class="head">${head}</span>${e.text ? `<span class="txt">${esc(e.text)}</span>` : ''}${detail}${result}</li>`;
     }).join('');
   }
-}
-
-/** Turn ended, but background work (a shell, a monitor…) will wake the session again. */
-export function awaitingBg(s) { return s.state === 'idle' && (s.bgTasks?.length > 0 || !!s.awaitingShell); }
-
-/** "백그라운드 작업 대기 · npm test 외 1개" — what an idle session is waiting on. */
-export function bgSummary(s) {
-  const tasks = s.bgTasks || [];
-  if (!tasks.length) return '백그라운드 셸 결과 대기';
-  const t = tasks[0];
-  const what = t.command || t.description || t.type || '작업';
-  return `백그라운드 작업 대기 · ${what}${tasks.length > 1 ? ` 외 ${tasks.length - 1}개` : ''}`;
 }
 
 function fmtLen(n) { return n >= 1024 ? `${(n / 1024).toFixed(1)}KB` : `${n}자`; }

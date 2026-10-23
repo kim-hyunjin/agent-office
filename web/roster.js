@@ -1,10 +1,8 @@
 // Staff roster: a compact list of every working cat under the HUD — state at a glance, click a row for the
 // detail panel, or send one home (two clicks, like the panel's 퇴근 button). Toggled from the HUD's "목록" button.
-import { STATE_LABEL, STATE_COLOR } from './render.js';
 import { FAMILIES, familyOf, sprite } from './sprites.js';
-import { BUSY } from './panel.js';
 import { closeSession } from './api.js';
-import { esc, pic } from './ui.js';
+import { esc, pic, STATE_LABEL, STATE_COLOR, BUSY, toolText } from './ui.js';
 
 const ICON_ZOOM = 2;
 
@@ -77,7 +75,7 @@ export class Roster {
     r.badge.style.background = STATE_COLOR[s.state] || '#888';
     const f = FAMILIES[familyOf(s.model)];
     const subs = (s.subagents || []).filter((a) => !a.ended).length;
-    const doing = s.currentTool ? `${s.currentTool.name}${s.currentTool.target ? ' · ' + s.currentTool.target : ''}` : '';
+    const doing = s.currentTool ? toolText(s.currentTool) : '';
     const where = this.placeOf(s.id);
     const err = this.failed.get(s.id);
     r.line.classList.toggle('err', !!err);

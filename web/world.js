@@ -2,7 +2,7 @@ import { TILE, compile } from './layout.js';
 import { buildBackground } from './tilemap.js';
 import { paletteFor, hashStr, familyOf } from './sprites.js';
 import { step } from './anim.js';
-import { awaitingBg } from './panel.js';
+import { awaitingBg } from './ui.js';
 
 const PLAY_AFTER_MS = Number(new URLSearchParams(location.search).get('playAfter') || 15) * 1000; // idle this long → off to play / lounge
 const MEETING_LINGER_MS = 8000; // keep the meeting room this long after the last subagent finishes

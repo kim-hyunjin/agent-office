@@ -1,6 +1,5 @@
 import { world } from './world.js';
-import { ICON, EV_ICON } from './panel.js';
-import { esc, fmtTime } from './ui.js';
+import { esc, fmtTime, ICON, EV_ICON } from './ui.js';
 
 // ---- activity ticker (sessions of the office on screen) ---------------------------
 const FEED_EVENTS = new Set(['PreToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'SessionStart', 'SessionEnd']);

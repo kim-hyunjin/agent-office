@@ -200,9 +200,10 @@ server/   index.mjs(부팅·디스패처) · routes.mjs(HTTP 라우트 표) · h
           sse.mjs · static.mjs(정적 파일) · config.mjs(경로·포트·시간 상수) · util.mjs
 web/      index.html · style.css · office.js(진입점: 탭·SSE·입력·루프) · world.js(상태·자리·동선) · feed.js(티커) · viewport.js(배율·줌·리핏)
           render.js · anim.js · sprites.js · cats.js(고양이 도트) · tilemap.js(배경 그리기)
-          layout.js(배치 데이터·검증, 서버와 공유) · limits.js(이름·인원·스킨 한도, 서버와 공유) · editor.js(배치 편집) · panel.js · roster.js(직원 목록)
+          layout.js(배치 데이터·검증, 서버와 공유) · limits.js(이름·인원·스킨 한도, 서버와 공유) · editor.js(배치 편집)
+          layout-edit.js(배치 편집 연산, DOM 없음) · editor-draw.js(편집 오버레이) · panel.js · roster.js(직원 목록)
           launcher.js(새 직원) · legend.js(모델 안내) · reply.js(전체 답변 창) · markdown.js
-          api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미)
+          api.js(JSON 요청) · ui.js(공용 DOM·포맷 도우미, 상태 이름·색·툴 아이콘)
 hooks/    send.mjs(훅 본체) · ensure-server.mjs(서버 자동 시작) · hooks.json(플러그인 훅) · install.mjs · uninstall.mjs · _common.mjs
 scripts/  demo.mjs(가짜 이벤트 재생) · stop.mjs(백그라운드 서버 종료)
 commands/ open.md · stop.md (플러그인 슬래시 명령)

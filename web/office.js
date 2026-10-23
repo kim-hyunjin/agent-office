@@ -1,14 +1,14 @@
 import { DEFAULT_OFFICE, inRect } from './layout.js';
 import { paletteFor, familyOf, FAMILIES, setBreedChoices, setSkins, onSkinLoad, sprite } from './sprites.js';
-import { render, STATE_LABEL, HUD_BTN } from './render.js';
+import { render, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
 import { drawEditorOverlay } from './editor-draw.js';
 import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
 import { openLauncher } from './launcher.js';
-import { Panel, awaitingBg, bgSummary } from './panel.js';
+import { Panel } from './panel.js';
 import { post } from './api.js';
-import { esc, pic, storage } from './ui.js';
+import { esc, pic, storage, STATE_LABEL, awaitingBg, bgSummary, thinkingFresh } from './ui.js';
 import { S, initViewport, resize, refit, officeXY, rosterAnchor } from './viewport.js';
 import { feedFrom, renderFeed } from './feed.js';
 import { world, applyLayout, here, syncSession, exitSession, dropCats, retarget, fadeStep, entAt, placeOf } from './world.js';
@@ -214,7 +214,7 @@ function describe(e) {
   if (!s) return '';
   const where = placeOf(e);
   const toolLine = (d) => d.currentTool ? `<span class="st">${esc(STATE_LABEL[d.state] || d.state)}</span> · <b>${esc(d.currentTool.name)}</b>${d.currentTool.target ? ' · ' + esc(d.currentTool.target) : ''}${d.currentTool.detail ? `<div class="detail">${esc(d.currentTool.detail)}</div>` : ''}` : `<span class="st">${esc(STATE_LABEL[d.state] || d.state)}</span>`;
-  const think = (d) => d.lastThinking && Date.now() - d.lastThinkingAt < 3 * 60_000 && d.state !== 'idle' ? `<div class="think">💭 ${esc(d.lastThinking)}</div>` : '';
+  const think = (d) => thinkingFresh(d, Date.now()) && d.state !== 'idle' ? `<div class="think">💭 ${esc(d.lastThinking)}</div>` : '';
   if (e.kind === 'assistant') {
     const a = e.data;
     return `<b>🧢 ${esc(a.type || 'agent')}</b> <span class="dim">보조 · ${esc(s.name)}${where ? ' · ' + where : ''}</span>`

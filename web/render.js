@@ -8,14 +8,6 @@ const SCREEN = {
   idle: '#1b1b24', offduty: '#1b1b24', thinking: '#263047', reading: '#2a2f3f', coding: '#2b6cff',
   terminal: '#0a120a', working: '#dfe6ee', searching: '#1e3a5f', delegating: '#3b4a7a', waiting: '#5a4a12',
 };
-export const STATE_LABEL = {
-  idle: '대기', thinking: '생각 중', reading: '읽는 중', coding: '코딩 중', terminal: '터미널', searching: '검색 중',
-  delegating: '위임 중', working: '작업 중', waiting: '응답 대기', offduty: '퇴근',
-};
-export const STATE_COLOR = {
-  idle: '#8e9aaf', thinking: '#a78bfa', reading: '#60a5fa', coding: '#3b82f6', terminal: '#22c55e', searching: '#06b6d4',
-  delegating: '#f59e0b', working: '#e5e7eb', waiting: '#fbbf24', offduty: '#6b7280',
-};
 const AUTO_MODES = new Set(['auto', 'bypassPermissions', 'dontAsk']);
 const BUBBLE_MS = 15000;
 /** Screen-space font size: scales with the canvas but never below a readable floor. */
