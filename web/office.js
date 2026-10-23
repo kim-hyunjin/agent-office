@@ -1,8 +1,8 @@
 import { TILE, WALL_RISE, compile, DEFAULT_OFFICE } from './layout.js';
 import { buildBackground } from './tilemap.js';
-import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices } from './sprites.js';
+import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices, sprite } from './sprites.js';
 import { step, clamp } from './anim.js';
-import { render, STATE_LABEL, NEW_BTN, LEGEND_BTN, HUD_BTN, EDIT_BTN } from './render.js';
+import { render, STATE_LABEL, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
 import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
@@ -16,6 +16,8 @@ const LIBRARY_LINGER_MS = 10000; // stay at the bookshelf this long after the la
 
 const canvas = document.getElementById('office');
 const tabsEl = document.getElementById('tabs');
+const barEl = document.getElementById('bar'); // office tabs + the tool buttons, above the office
+const toolsEl = document.getElementById('tools');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const panel = new Panel(document.getElementById('panel'), {
@@ -105,7 +107,7 @@ const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >=
 function fitScale() {
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
-  const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - (tabsEl.hidden ? 0 : tabsEl.offsetHeight);
+  const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - barEl.offsetHeight;
   // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
   return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H) * 20) / 20, 1, 8);
 }
@@ -121,6 +123,8 @@ function resize() {
   S = fitScale();
   canvas.width = Math.round(world.view.geo.W * S); canvas.height = Math.round(world.view.geo.VIEW_H * S);
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
+  barEl.style.width = canvas.style.width;
+  toolsEl.classList.toggle('off', editor.isOpen); // the editor has its own buttons
   placeTicker();
 }
 
@@ -135,6 +139,7 @@ function refit() {
   if (s === S && !canvas.classList.contains('refit')) return;
   canvas.classList.add('refit');
   canvas.style.width = `${Math.round(world.view.geo.W * s)}px`; canvas.style.height = `${Math.round(world.view.geo.VIEW_H * s)}px`;
+  barEl.style.width = canvas.style.width;
   clearTimeout(refitTimer);
   refitTimer = setTimeout(resize, PANEL_ANIM_MS + 20);
 }
@@ -576,8 +581,8 @@ function describe(e) {
 }
 
 const inRect = (b, [x, y]) => !!b && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
-/** Canvas-drawn buttons on the bottom wall (rects are written by render.js each frame). */
-const buttonAt = (xy) => (inRect(world.newBtn, xy) ? NEW_BTN : inRect(world.legendBtn, xy) ? LEGEND_BTN : inRect(world.editBtn, xy) ? EDIT_BTN : inRect(world.hudBtn, xy) ? HUD_BTN : null);
+/** The HUD on the top wall is the one canvas-drawn button (its rect is written by render.js each frame). */
+const buttonAt = (xy) => (inRect(world.hudBtn, xy) ? HUD_BTN : null);
 
 canvas.addEventListener('mousemove', (ev) => {
   if (editor.isOpen) { world.hoverKey = null; tip.hidden = true; return; } // the editor handles the pointer
@@ -602,15 +607,6 @@ canvas.addEventListener('click', (ev) => {
   if (editor.isOpen) return;
   const xy = officeXY(ev);
   const btn = buttonAt(xy);
-  if (btn === EDIT_BTN) { // layout editor takes the panel's place
-    if (roster.isOpen) toggleRoster();
-    panel.close();
-    world.selectedKey = null;
-    if (officeOf(world.officeId)) editor.open(officeOf(world.officeId));
-    return;
-  }
-  if (btn === NEW_BTN) { openLauncher(); return; }
-  if (btn === LEGEND_BTN) { openLegend(world.sessions); return; }
   if (btn === HUD_BTN) { toggleRoster(); return; }
   const e = entAt(...xy);
   if (!e) { world.selectedKey = null; panel.close(); return; }
@@ -618,6 +614,23 @@ canvas.addEventListener('click', (ev) => {
   const s = world.sessions.get(e.sessionId);
   if (s) { panel.open(s); history.replaceState(null, '', `#s=${encodeURIComponent(s.id)}`); }
 });
+
+// ---- tool buttons (above the office) ---------------------------------------------------
+document.getElementById('t-new').addEventListener('click', () => openLauncher());
+document.getElementById('t-legend').addEventListener('click', () => openLegend(world.sessions));
+document.getElementById('t-edit').addEventListener('click', () => { // layout editor takes the panel's place
+  if (editor.isOpen || !officeOf(world.officeId)) return;
+  if (roster.isOpen) toggleRoster();
+  panel.close();
+  world.selectedKey = null;
+  editor.open(officeOf(world.officeId));
+});
+{ // the legend button wears a cat, like the legend itself
+  const icon = sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0), c = document.createElement('canvas');
+  c.width = icon.width; c.height = icon.height; c.style.width = `${icon.width}px`; c.style.height = `${icon.height}px`;
+  c.getContext('2d').drawImage(icon, 0, 0);
+  document.getElementById('t-legend').prepend(c);
+}
 
 // ---- loop ----------------------------------------------------------------------
 let last = performance.now();

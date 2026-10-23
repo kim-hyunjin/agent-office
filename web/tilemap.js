@@ -71,11 +71,7 @@ export function buildBackground(geo) {
     drawChair(g, r.head.x * TILE, r.head.y * TILE, 'side', true);
   }
   for (const r of geo.receptions) drawReception(g, r.counter.x * TILE, r.counter.y * TILE, r.counter.w * TILE);
-  // front entrance: an opening in the bottom wall's cap, door frame posts on either side, doormat on the sill
-  g.fillStyle = C.lobby; g.fillRect(DOOR.x * TILE, H - TILE, TILE, TILE);
-  g.fillStyle = C.doorDark; g.fillRect(DOOR.x * TILE - 2, H - TILE, 2, TILE); g.fillRect(DOOR.x * TILE + TILE, H - TILE, 2, TILE);
-  g.fillStyle = C.door; g.fillRect(DOOR.x * TILE + 1, H - TILE + 3, TILE - 2, 10);
-  g.fillStyle = C.doorDark; for (let i = 0; i < 4; i++) g.fillRect(DOOR.x * TILE + 3, H - TILE + 5 + i * 2, TILE - 6, 1);
+  drawEntrance(g, DOOR);
   for (const d of geo.desks) {
     drawDeskChair(g, d.chair.x * TILE, d.chair.y * TILE, d.chair.face === 'right');
     drawDesk(g, d.desk.x * TILE, d.desk.y * TILE, d.desk.w * TILE, d.desk.h * TILE, !!d.right);
@@ -99,6 +95,33 @@ export function buildBackground(geo) {
   }
   for (const p of geo.plants) drawPlant(g, p.x * TILE, p.y * TILE);
   return c;
+}
+
+/**
+ * Front entrance on an outer wall. Bottom / left / right walls face away, so it's an opening in the cap with frame
+ * posts on either side and a doormat on the sill; on the top wall, whose face shows, it's a wooden door in the face.
+ */
+function drawEntrance(g, d) {
+  const x = d.x * TILE, y = d.y * TILE;
+  if (d.side === 'top') {
+    g.fillStyle = C.doorDark; g.fillRect(x - 1, -11, TILE + 2, TILE + 11);
+    g.fillStyle = C.door; g.fillRect(x + 1, -9, TILE - 2, TILE + 9);
+    g.fillStyle = C.doorDark; g.fillRect(x + 3, -7, TILE - 6, 7); g.fillRect(x + 3, 3, TILE - 6, 9); // panels
+    g.fillStyle = C.door; g.fillRect(x + 4, -6, TILE - 8, 5); g.fillRect(x + 4, 4, TILE - 8, 7);
+    g.fillStyle = '#e8c35a'; g.fillRect(x + TILE - 4, 1, 2, 2); // knob
+    return;
+  }
+  g.fillStyle = C.lobby; g.fillRect(x, y, TILE, TILE);
+  g.fillStyle = C.doorDark;
+  if (d.side === 'bottom') {
+    g.fillRect(x - 2, y, 2, TILE); g.fillRect(x + TILE, y, 2, TILE);
+    g.fillStyle = C.door; g.fillRect(x + 1, y + 3, TILE - 2, 10);
+    g.fillStyle = C.doorDark; for (let i = 0; i < 4; i++) g.fillRect(x + 3, y + 5 + i * 2, TILE - 6, 1);
+  } else {
+    g.fillRect(x, y - 2, TILE, 2); g.fillRect(x, y + TILE, TILE, 2);
+    g.fillStyle = C.door; g.fillRect(x + 3, y + 1, 10, TILE - 2);
+    g.fillStyle = C.doorDark; for (let i = 0; i < 4; i++) g.fillRect(x + 5 + i * 2, y + 3, 1, TILE - 6);
+  }
 }
 
 /** North–south partition tile: only its top shows. Glass is a rail with panes; plaster is a dark cap like the outer walls. */

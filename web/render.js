@@ -1,6 +1,6 @@
 import { TILE, WALL_RISE } from './layout.js';
 import { drawReception, drawBox } from './tilemap.js';
-import { sprite, outline, OUTLINE_W, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf, paletteFor } from './sprites.js';
+import { sprite, outline, OUTLINE_W, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf } from './sprites.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
@@ -66,8 +66,6 @@ export function render(ctx, S, world, now) {
   drawSign(ctx, S, geo);
   const placed = [];
   for (const e of list) drawBubble(ctx, S, e, now, placed, geo.W);
-  if (!world.editing) drawLegend(ctx, S, world, now);
-  else world.legendBtn = world.newBtn = world.editBtn = null;
   ctx.setTransform(1, 0, 0, 1, 0, 0); // HUD hangs on the raised wall
   drawHUD(ctx, S, world, now);
 }
@@ -362,40 +360,4 @@ function drawHUD(ctx, S, world, now) {
   ctx.textAlign = 'left';
 }
 
-/** Bottom wall: "+ 새 직원" by the entrance; "배치 편집" and "모델 안내" (opens the legend dialog) in the right corner. */
-function drawLegend(ctx, S, world) {
-  ctx.font = `${fpx(4, S)}px ${FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  const { W, H } = world.view.geo;
-  const y0 = (H - TILE) * S + 2 * S, h = 12 * S;
-  const label = '모델 안내';
-  const icon = sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0);
-  const w = 3 * S + icon.width * S + 3 * S + ctx.measureText(label).width + 5 * S;
-  const x = (W - TILE) * S - w - 2 * S;
-  ctx.fillStyle = world.hoverKey === LEGEND_BTN ? 'rgba(52,56,92,0.95)' : 'rgba(20,22,40,0.85)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
-  ctx.save(); ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(icon, x + 3 * S, y0 + (h - icon.height * S) / 2, icon.width * S, icon.height * S);
-  ctx.restore();
-  ctx.fillStyle = '#f3f4f6'; ctx.fillText(label, x + 6 * S + icon.width * S, y0 + h / 2);
-  world.legendBtn = { x: x / S, y: y0 / S, w: w / S, h: h / S };
-  const elabel = '배치 편집';
-  const ew = ctx.measureText(elabel).width + 10 * S, ex = x - ew - 3 * S;
-  ctx.fillStyle = world.hoverKey === EDIT_BTN ? 'rgba(52,56,92,0.95)' : 'rgba(20,22,40,0.85)'; roundRect(ctx, ex, y0, ew, h, 2 * S); ctx.fill();
-  ctx.fillStyle = '#f3f4f6'; ctx.textAlign = 'center'; ctx.fillText(elabel, ex + ew / 2, y0 + h / 2); ctx.textAlign = 'left';
-  world.editBtn = { x: ex / S, y: y0 / S, w: ew / S, h: h / S };
-  drawNewButton(ctx, S, world, y0, h);
-}
-export const EDIT_BTN = '__edit__';
-export const LEGEND_BTN = '__legend__';
 export const HUD_BTN = '__hud__';
-
-/** "+ 새 직원" button on the bottom wall, just right of the lobby entrance. Its rect (office px) goes to world.newBtn for hit-testing. */
-function drawNewButton(ctx, S, world, y0, h) {
-  const label = '+ 새 직원';
-  const w = ctx.measureText(label).width + 8 * S;
-  const x = ((world.view.geo.door.x + 1) * TILE + 4) * S;
-  const hover = world.hoverKey === NEW_BTN;
-  ctx.fillStyle = hover ? '#ffe08a' : 'rgba(255,209,102,0.92)'; roundRect(ctx, x, y0, w, h, 2 * S); ctx.fill();
-  ctx.fillStyle = '#1f2233'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y0 + h / 2); ctx.textAlign = 'left';
-  world.newBtn = { x: x / S, y: y0 / S, w: w / S, h: h / S };
-}
-export const NEW_BTN = '__new__';

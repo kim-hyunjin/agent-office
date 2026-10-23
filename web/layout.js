@@ -4,7 +4,8 @@
 export const TILE = 16;
 /** Extra height above row 0 so the top wall's face stands two tiles tall (3/4 view). Purely visual: the grid starts below it. */
 export const WALL_RISE = TILE;
-export const LAYOUT_VERSION = 1;
+/** 2: play rooms have walls by default (v1 play rooms without a `walls` field stay open), the front door has a side. */
+export const LAYOUT_VERSION = 2;
 export const MIN_W = 20, MIN_H = 14, MAX_W = 64, MAX_H = 40;
 
 /** Room types: floor colors live in tilemap.js. A room's walls are glass when `glass` (default: meeting rooms). */
@@ -14,7 +15,7 @@ export const ROOM_TYPES = {
   lounge: { label: '라운지' },
   plan: { label: '기획실' },
   library: { label: '서재' },
-  play: { label: '놀이터', walls: false },
+  play: { label: '놀이터' },
   office: { label: '사무 공간' },
 };
 
@@ -42,53 +43,76 @@ export const ITEM_KINDS = {
   sign: { label: '간판', w: 5, h: 1, wall: true, max: 1 },
 };
 
-/** The original office: meeting rooms A/B (left) and C/D (right) flank the open office; lobby, lounge, planning room and library along the bottom. */
+/**
+ * The default office: one room of each type. Meeting room, open office and library along the top; a corridor
+ * (row 9); lobby, lounge, planning room and play room along the bottom.
+ */
 export const DEFAULT_OFFICE = {
   v: LAYOUT_VERSION,
   w: 32, h: 20,
-  door: { x: 3 },
+  door: { side: 'bottom', x: 3 },
   rooms: [
-    { id: 'r1', type: 'meeting', name: '회의실 A', x: 1, y: 1, w: 6, h: 5, doors: [{ x: 7, y: 1 }] },
-    { id: 'r2', type: 'meeting', name: '회의실 B', x: 1, y: 7, w: 6, h: 5, doors: [{ x: 7, y: 7 }] },
-    { id: 'r3', type: 'meeting', name: '회의실 C', x: 25, y: 1, w: 6, h: 5, doors: [{ x: 24, y: 1 }] },
-    { id: 'r4', type: 'meeting', name: '회의실 D', x: 25, y: 7, w: 6, h: 5, doors: [{ x: 24, y: 7 }] },
-    { id: 'r5', type: 'lobby', name: '로비', x: 1, y: 13, w: 8, h: 6, doors: [{ x: 8, y: 12, open: true }] }, // opens straight up into the office
-    { id: 'r6', type: 'lounge', name: '라운지', x: 10, y: 13, w: 6, h: 6, doors: [{ x: 12, y: 12 }] },
-    { id: 'r7', type: 'plan', name: '기획실', x: 17, y: 13, w: 5, h: 6, doors: [{ x: 19, y: 12 }] },
-    { id: 'r8', type: 'library', name: '서재', x: 23, y: 13, w: 8, h: 6, doors: [{ x: 23, y: 12 }] },
-    { id: 'r9', type: 'play', name: '놀이터', x: 9, y: 8, w: 14, h: 3, doors: [] }, // row 11 stays clear: the way to the bottom rooms' doors
+    { id: 'r1', type: 'meeting', name: '회의실', x: 1, y: 1, w: 6, h: 7, doors: [{ x: 4, y: 8 }] },
+    { id: 'r2', type: 'office', name: '사무 공간', x: 8, y: 1, w: 16, h: 7, doors: [{ x: 13, y: 8 }, { x: 18, y: 8 }] },
+    { id: 'r3', type: 'library', name: '서재', x: 25, y: 1, w: 6, h: 7, doors: [{ x: 24, y: 3 }] }, // opens into the office
+    { id: 'r4', type: 'lobby', name: '로비', x: 1, y: 11, w: 7, h: 8, doors: [{ x: 6, y: 10, open: true }] },
+    { id: 'r5', type: 'lounge', name: '라운지', x: 9, y: 11, w: 7, h: 8, doors: [{ x: 12, y: 10 }] },
+    { id: 'r6', type: 'plan', name: '기획실', x: 17, y: 11, w: 5, h: 8, doors: [{ x: 19, y: 10 }] },
+    { id: 'r7', type: 'play', name: '놀이터', x: 23, y: 11, w: 8, h: 8, doors: [{ x: 26, y: 10 }] },
   ],
   items: [
     ...[[9, 2], [14, 2], [19, 2], [9, 5], [14, 5], [19, 5]].map(([x, y], i) => ({ id: `d${i + 1}`, kind: 'deskPod', x, y })),
-    { id: 't1', kind: 'meetingTable', x: 1, y: 2 }, { id: 't2', kind: 'meetingTable', x: 1, y: 8 },
-    { id: 't3', kind: 'meetingTable', x: 25, y: 2 }, { id: 't4', kind: 'meetingTable', x: 25, y: 8 },
-    { id: 'i1', kind: 'reception', x: 2, y: 13 },
-    { id: 'i2', kind: 'rug', x: 10, y: 14 },
-    { id: 'i3', kind: 'sofa', x: 11, y: 15 },
-    { id: 'i4', kind: 'coffee', x: 15, y: 13 },
-    { id: 'i5', kind: 'whiteboard', x: 18, y: 14 },
-    { id: 'i6', kind: 'bookshelf', x: 24, y: 18 },
-    { id: 'i7', kind: 'catTree', x: 10, y: 9 },
-    { id: 'i8', kind: 'scratchPost', x: 13, y: 9 },
-    { id: 'i9', kind: 'yarn', x: 16, y: 10 },
-    { id: 'i10', kind: 'box', x: 19, y: 9 },
-    { id: 'i11', kind: 'wheel', x: 16, y: 9 },
-    { id: 'i12', kind: 'cushion', x: 21, y: 10 },
-    ...[[1, 13], [6, 13], [10, 10], [23, 10], [15, 18], [17, 18], [30, 13], [23, 18]].map(([x, y], i) => ({ id: `p${i + 1}`, kind: 'plant', x, y })),
-    { id: 'w1', kind: 'window', x: 15, y: 0 },
-    { id: 'w2', kind: 'sign', x: 22, y: 0 },
+    { id: 't1', kind: 'meetingTable', x: 1, y: 2 },
+    { id: 'i1', kind: 'reception', x: 2, y: 11 },
+    { id: 'i2', kind: 'rug', x: 10, y: 12 },
+    { id: 'i3', kind: 'sofa', x: 11, y: 13 },
+    { id: 'i4', kind: 'coffee', x: 15, y: 11 },
+    { id: 'i5', kind: 'whiteboard', x: 18, y: 12 },
+    { id: 'i6', kind: 'bookshelf', x: 25, y: 7 },
+    { id: 'i7', kind: 'catTree', x: 24, y: 12 },
+    { id: 'i8', kind: 'scratchPost', x: 27, y: 12 },
+    { id: 'i9', kind: 'yarn', x: 25, y: 15 },
+    { id: 'i10', kind: 'box', x: 29, y: 17 },
+    { id: 'i11', kind: 'wheel', x: 28, y: 14 },
+    { id: 'i12', kind: 'cushion', x: 24, y: 17 },
+    ...[[1, 11], [7, 17], [9, 18], [17, 18], [21, 18], [30, 11], [8, 7], [23, 7], [30, 1], [1, 7]].map(([x, y], i) => ({ id: `p${i + 1}`, kind: 'plant', x, y })),
+    { id: 'w1', kind: 'window', x: 14, y: 0 },
+    { id: 'w2', kind: 'sign', x: 21, y: 0 },
   ],
 };
 
 export const cloneOffice = (o) => JSON.parse(JSON.stringify(o));
-/** Only the fields a layout has (anything else from a client is dropped). Validate the result. */
+
+/** The front door sits on one of the outer walls: `x` along the top/bottom wall, `y` along the left/right one. */
+export const DOOR_SIDES = { bottom: '아래', top: '위', left: '왼쪽', right: '오른쪽' };
+const horizontal = (side) => side === 'top' || side === 'bottom';
+/** The door's tile on the outer wall and the floor tile just inside it, where cats come in and leave. */
+export function doorTiles(office) {
+  const { w, h } = office, side = DOOR_SIDES[office.door?.side] ? office.door.side : 'bottom';
+  const at = horizontal(side) ? office.door?.x : office.door?.y;
+  const door = { side, x: side === 'left' ? 0 : side === 'right' ? w - 1 : at, y: side === 'top' ? 0 : side === 'bottom' ? h - 1 : at };
+  const spawn = { x: door.x + (side === 'left' ? 1 : side === 'right' ? -1 : 0), y: door.y + (side === 'top' ? 1 : side === 'bottom' ? -1 : 0) };
+  return { door, spawn };
+}
+/** Door data for a tile on (or near) the outer wall: the closest wall wins, corners excluded. */
+export function doorFor(office, tx, ty) {
+  const { w, h } = office;
+  const x = Math.max(0, Math.min(w - 1, tx)), y = Math.max(0, Math.min(h - 1, ty));
+  const side = Object.entries({ left: x, right: w - 1 - x, top: y, bottom: h - 1 - y }).sort((a, b) => a[1] - b[1])[0][0];
+  return horizontal(side) ? { side, x: Math.max(1, Math.min(w - 2, x)) } : { side, y: Math.max(1, Math.min(h - 2, y)) };
+}
+
+/** Only the fields a layout has (anything else from a client is dropped), upgraded to this version. Validate the result. */
 export function normalize(o) {
   if (!o || typeof o !== 'object') return null;
   const pick = (src, keys) => Object.fromEntries(keys.filter((k) => src?.[k] !== undefined).map((k) => [k, src[k]]));
+  const old = !(o.v >= 2);
+  const side = DOOR_SIDES[o.door?.side] ? o.door.side : 'bottom';
   return {
-    v: LAYOUT_VERSION, w: o.w, h: o.h, door: { x: o.door?.x },
+    v: LAYOUT_VERSION, w: o.w, h: o.h, door: horizontal(side) ? { side, x: o.door?.x } : { side, y: o.door?.y },
     rooms: Array.isArray(o.rooms) ? o.rooms.map((r) => ({
       ...pick(r, ['id', 'type', 'name', 'x', 'y', 'w', 'h', 'glass', 'walls']),
+      ...(old && r?.type === 'play' && r.walls === undefined ? { walls: false } : {}), // v1 play rooms had no walls
       doors: Array.isArray(r?.doors) ? r.doors.map((d) => ({ x: d?.x, y: d?.y, ...(d?.open ? { open: true } : {}) })) : r?.doors,
     })) : o.rooms,
     items: Array.isArray(o.items) ? o.items.map((it) => pick(it, ['id', 'kind', 'x', 'y'])) : o.items,
@@ -107,8 +131,7 @@ export const ringRect = (r) => ({ x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2
 export function compile(office) {
   const MAP_W = office.w, MAP_H = office.h;
   const W = MAP_W * TILE, H = MAP_H * TILE;
-  const door = { x: office.door?.x ?? 3, y: MAP_H - 1 };
-  const spawn = { x: door.x, y: MAP_H - 2 };
+  const { door, spawn } = doorTiles({ ...office, door: { x: 3, ...office.door } });
   const rooms = office.rooms || [];
   const items = (office.items || []).filter((it) => ITEM_KINDS[it.kind]);
   const byKind = (k) => items.filter((it) => it.kind === k);
@@ -278,7 +301,8 @@ export function validate(office) {
   if (!office || typeof office !== 'object') return [{ msg: '배치 데이터가 없습니다.', tiles: [] }];
   const { w, h } = office;
   if (!int(w) || !int(h) || w < MIN_W || h < MIN_H || w > MAX_W || h > MAX_H) return [{ msg: `사무실 크기는 ${MIN_W}×${MIN_H} – ${MAX_W}×${MAX_H} 칸이어야 합니다.`, tiles: [] }];
-  if (!int(office.door?.x) || office.door.x < 1 || office.door.x > w - 2) err('정문 위치가 사무실 밖입니다.');
+  const side = office.door?.side ?? 'bottom', along = horizontal(side) ? office.door?.x : office.door?.y;
+  if (!DOOR_SIDES[side] || !int(along) || along < 1 || along > (horizontal(side) ? w : h) - 2) err('정문 위치가 사무실 밖입니다.');
   const rooms = Array.isArray(office.rooms) ? office.rooms : [];
   const items = Array.isArray(office.items) ? office.items : [];
   if (rooms.length > 40 || items.length > 300) return [{ msg: '방이나 가구가 너무 많습니다.', tiles: [] }];
@@ -336,7 +360,10 @@ export function validate(office) {
   const geo = compile(office);
   const wallAt = new Set(geo.wallTiles.filter((t) => !geo.isDoor(t.x, t.y)).map((t) => `${t.x},${t.y}`));
   for (const it of items) {
-    if (ITEM_KINDS[it.kind].wall) continue;
+    if (ITEM_KINDS[it.kind].wall) {
+      if (geo.door.side === 'top' && inRect(itemRect(it), geo.door.x, 0)) err(`${ITEM_KINDS[it.kind].label}이(가) 정문을 가립니다.`, [geo.door]);
+      continue;
+    }
     const hit = cells(itemRect(it)).filter((c) => wallAt.has(`${c.x},${c.y}`) || geo.isDoor(c.x, c.y));
     if (hit.length) err(`${ITEM_KINDS[it.kind].label}이(가) 벽이나 문 위에 있습니다.`, hit);
   }
