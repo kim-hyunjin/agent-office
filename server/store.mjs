@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   SEATS_PER_DESK, LOG_SIZE, SNAPSHOT_LOG, DESK_MEMORY_MS,
-  SUBAGENT_TTL_MS, SUBAGENT_STALE_MS, SESSION_TTL_MS, ORPHAN_SESSION_MS, STATE_FILE,
+  SUBAGENT_TTL_MS, SUBAGENT_STALE_MS, SESSION_TTL_MS, ORPHAN_SESSION_MS, STATE_FILE, SKINS_DIR,
 } from './config.mjs';
 import { debounce, safeJsonParse } from './util.mjs';
 import { repoOf } from './repo.mjs';
@@ -19,18 +19,22 @@ export const STATES = ['idle', 'thinking', 'reading', 'coding', 'terminal', 'sea
 const BUSY_STATES = new Set(['thinking', 'reading', 'coding', 'terminal', 'searching', 'delegating', 'working']);
 export const isBusyState = (s) => BUSY_STATES.has(s);
 export const CAT_FAMILIES = ['fable', 'opus', 'sonnet', 'haiku', 'other'];
-export const BREED_KEY = /^[a-z]{2,24}$/; // the breed list itself lives in web/sprites.js
+export const SKIN_ID = /^[a-z0-9]{10}$/;
+// a built-in breed (the list itself lives in web/sprites.js) or an uploaded skin, 'skin:<id>'
+export const BREED_KEY = /^([a-z]{2,24}|skin:[a-z0-9]{10})$/;
 export const DEFAULT_OFFICE_ID = 'default';
 const newOffice = (id, name, repos, layout = cloneOffice(DEFAULT_OFFICE)) => ({ id, name, repos, layout });
 
 export class Store {
-  constructor({ stateFile = STATE_FILE } = {}) {
+  constructor({ stateFile = STATE_FILE, skinsDir = SKINS_DIR } = {}) {
     this.sessions = new Map();
     this.desks = {};           // sessionId -> { desk, office, at, terminal? }
     this.offices = [newOffice(DEFAULT_OFFICE_ID, '사무실', ['default'])]; // one per repo; repos: repo keys that work there
     this.cats = {};            // model family -> breed key the user picked (absent = default breed)
+    this.skins = [];           // uploaded sprite sheets: { id, name, cellW, cellH }, image at skinsDir/<id>.png
     this.together = null;      // office id everyone works in regardless of repo, or null: each repo in its own office
     this.stateFile = stateFile;
+    this.skinsDir = skinsDir;
     this.listeners = new Set();
     this.save = debounce(() => this.saveNow(), 500);
   }
@@ -43,8 +47,16 @@ export class Store {
     for (const [id, v] of Object.entries(data?.desks || {})) {
       if (v && typeof v.desk === 'number' && now - (v.at || 0) < DESK_MEMORY_MS) this.desks[id] = v;
     }
+    this.skins = [];
+    for (const k of Array.isArray(data?.skins) ? data.skins : []) {
+      if (SKIN_ID.test(k?.id) && !this.skins.some((x) => x.id === k.id) && fs.existsSync(this.skinFile(k.id))) {
+        this.skins.push({ id: k.id, name: String(k.name || '스킨'), cellW: k.cellW, cellH: k.cellH });
+      }
+    }
     this.cats = {};
-    for (const [fam, breed] of Object.entries(data?.cats || {})) if (CAT_FAMILIES.includes(fam) && BREED_KEY.test(breed)) this.cats[fam] = breed;
+    for (const [fam, breed] of Object.entries(data?.cats || {})) {
+      if (CAT_FAMILIES.includes(fam) && BREED_KEY.test(breed) && this.hasBreed(breed)) this.cats[fam] = breed;
+    }
     const offices = [];
     for (const o of Array.isArray(data?.offices) ? data.offices : []) {
       if (typeof o?.id !== 'string' || offices.some((x) => x.id === o.id) || !Array.isArray(o.repos)) continue;
@@ -58,7 +70,7 @@ export class Store {
   saveNow() {
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, offices: this.offices, together: this.together, updatedAt: Date.now() }, null, 2));
+      fs.writeFileSync(this.stateFile, JSON.stringify({ desks: this.desks, cats: this.cats, skins: this.skins, offices: this.offices, together: this.together, updatedAt: Date.now() }, null, 2));
     } catch (e) {
       console.error('[store] save failed:', e.message);
     }
@@ -74,7 +86,34 @@ export class Store {
   setCat(fam, breed) {
     if (breed) this.cats[fam] = breed; else delete this.cats[fam];
     this.save();
-    this.emit('settings', { cats: this.cats });
+    this.emitSettings();
+  }
+  emitSettings() { this.emit('settings', { cats: this.cats, skins: this.skins }); }
+  skinFile(id) { return path.join(this.skinsDir, `${id}.png`); }
+  /** Skins must exist; built-in breed keys are checked by the browser (unknown ones draw the default). */
+  hasBreed(breed) { return !breed.startsWith('skin:') || this.skins.some((k) => `skin:${k.id}` === breed); }
+  /** Store an uploaded sprite sheet (already validated) and offer it to every browser. */
+  addSkin({ name, cellW, cellH }, png) {
+    let id;
+    do id = Array.from({ length: 10 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+    while (this.skins.some((k) => k.id === id));
+    fs.mkdirSync(this.skinsDir, { recursive: true });
+    fs.writeFileSync(this.skinFile(id), png);
+    const skin = { id, name, cellW, cellH };
+    this.skins.push(skin);
+    this.save();
+    this.emitSettings();
+    return skin;
+  }
+  /** Delete a skin; families drawn with it go back to their default breed. */
+  removeSkin(id) {
+    if (!this.skins.some((k) => k.id === id)) return false;
+    this.skins = this.skins.filter((k) => k.id !== id);
+    for (const [fam, breed] of Object.entries(this.cats)) if (breed === `skin:${id}`) delete this.cats[fam];
+    try { fs.unlinkSync(this.skinFile(id)); } catch { /* already gone */ }
+    this.save();
+    this.emitSettings();
+    return true;
   }
 
   // ---- offices --------------------------------------------------------------
@@ -355,6 +394,7 @@ export class Store {
       together: this.together,
       seatsPerDesk: SEATS_PER_DESK,
       cats: this.cats,
+      skins: this.skins,
       sessions: [...this.sessions.values()].map((s) => this.serializeSession(s)),
     };
   }

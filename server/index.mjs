@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import {
-  PORT, HOST, MAX_BODY_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR,
+  PORT, HOST, MAX_BODY_BYTES, MAX_SKIN_BYTES, MAX_PROMPT_CHARS, GC_INTERVAL_MS, REGISTRY_POLL_MS, TRANSCRIPT_POLL_MS, STATE_FILE, PID_FILE, DATA_DIR,
 } from './config.mjs';
 import { Store, CAT_FAMILIES, BREED_KEY, DEFAULT_OFFICE_ID } from './store.mjs';
 import { DEFAULT_OFFICE, cloneOffice, normalize, validate } from '../web/layout.js';
@@ -60,6 +60,22 @@ async function readJson(req, res) {
   if (!data || typeof data !== 'object') { json(res, 400, { error: 'bad json' }); return null; }
   return data;
 }
+
+// Sprite sheet rules (see README "스킨"): equal cells, one row per animation, up to SKIN_ROWS rows.
+const SKIN_ROWS = 12, SKIN_COLS = 16;
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** Checks an uploaded sheet; returns an error message, or null when it's usable. */
+function skinError(png, cellW, cellH) {
+  if (!png.length) return 'PNG 파일이 비어 있습니다.';
+  if (png.length > MAX_SKIN_BYTES) return `파일이 너무 큽니다(최대 ${MAX_SKIN_BYTES / 1024}KB).`;
+  if (png.length < 24 || !png.subarray(0, 8).equals(PNG_SIG) || png.toString('latin1', 12, 16) !== 'IHDR') return 'PNG 파일이 아닙니다.';
+  const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+  if (w % cellW || h % cellH) return `이미지 크기(${w}×${h})가 칸 크기(${cellW}×${cellH})로 나누어떨어지지 않습니다.`;
+  if (h / cellH < 2 || h / cellH > SKIN_ROWS) return `줄 수는 2–${SKIN_ROWS}줄이어야 합니다(지금 ${h / cellH}줄). 최소 앉기·걷기 두 줄이 필요합니다.`;
+  if (w / cellW > SKIN_COLS) return `한 줄의 칸 수는 ${SKIN_COLS}칸까지입니다(지금 ${w / cellW}칸).`;
+  return null;
+}
+const isCell = (n) => Number.isInteger(n) && n >= 4 && n <= 64;
 
 const MAX_HIRES = 5; // employees per "새 직원" request
 const orcaError = (res, e) => json(res, e.code === 'terminal_not_found' || e.code === 'not_claude' ? 409 : 502, { error: e.message, code: e.code });
@@ -183,9 +199,38 @@ const server = http.createServer(async (req, res) => {
       const data = await readJson(req, res);
       if (!data) return;
       const fam = String(data.family || ''), breed = data.breed == null ? null : String(data.breed);
-      if (!CAT_FAMILIES.includes(fam) || (breed !== null && !BREED_KEY.test(breed))) { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
+      if (!CAT_FAMILIES.includes(fam) || (breed !== null && (!BREED_KEY.test(breed) || !store.hasBreed(breed)))) { json(res, 400, { error: '잘못된 요청입니다.' }); return; }
       store.setCat(fam, breed);
       json(res, 200, { ok: true, cats: store.cats });
+      return;
+    }
+    if (req.method === 'POST' && p === '/skins') {
+      const data = await readJson(req, res);
+      if (!data) return;
+      const name = String(data.name ?? '').trim(), cellW = Number(data.cellW), cellH = Number(data.cellH);
+      if (!name || name.length > 30) { json(res, 400, { error: '스킨 이름은 1–30자여야 합니다.' }); return; }
+      if (!isCell(cellW) || !isCell(cellH)) { json(res, 400, { error: '칸 크기는 4–64px이어야 합니다.' }); return; }
+      const png = Buffer.from(String(data.png ?? '').replace(/^data:image\/png;base64,/, ''), 'base64');
+      const err = skinError(png, cellW, cellH);
+      if (err) { json(res, 400, { error: err }); return; }
+      const skin = store.addSkin({ name, cellW, cellH }, png);
+      console.log(`[web] skin uploaded: ${name} (${skin.id})`);
+      json(res, 200, { ok: true, skin });
+      return;
+    }
+    const sk = p.match(/^\/skins\/([a-z0-9]{10})(\.png|\/delete)$/);
+    if (sk && req.method === 'GET' && sk[2] === '.png') {
+      const file = store.skins.some((k) => k.id === sk[1]) ? store.skinFile(sk[1]) : null;
+      if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+      // ids are never reused, so the image under one can be cached for good
+      res.writeHead(200, { 'Content-Type': 'image/png', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'max-age=31536000, immutable' });
+      fs.createReadStream(file).pipe(res);
+      return;
+    }
+    if (sk && req.method === 'POST' && sk[2] === '/delete') {
+      if (!(await readJson(req, res))) return;
+      if (!store.removeSkin(sk[1])) { json(res, 404, { error: '없는 스킨입니다.' }); return; }
+      json(res, 200, { ok: true });
       return;
     }
     if (req.method === 'POST' && p === '/orca/launch') {

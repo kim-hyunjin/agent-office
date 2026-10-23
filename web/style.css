@@ -23,6 +23,14 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #tools button.primary { color: #1f2233; background: #ffd166; border-color: #ffd166; font-weight: 700; }
 #tools button.primary:hover { background: #ffe08a; }
 #tools canvas { image-rendering: pixelated; }
+#tools .zoom { display: flex; }
+#tools .zoom button { border-radius: 0; padding: 4px 8px; min-width: 28px; justify-content: center; }
+#tools .zoom button:first-child { border-radius: 6px 0 0 6px; }
+#tools .zoom button:last-child { border-radius: 0 6px 6px 0; }
+#tools .zoom button + button { border-left: 0; }
+#tools .zoom #t-zoom { color: var(--dim); font-variant-numeric: tabular-nums; }
+#tools .zoom #t-zoom.pinned { color: var(--accent); }
+#tools .zoom button:disabled { opacity: .4; cursor: default; }
 #tabs button {
   display: flex; align-items: center; gap: 6px; padding: 5px 12px 4px; font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer;
   color: var(--dim); background: var(--panel); border: 1px solid #2f3352; border-bottom: 0; border-radius: 6px 6px 0 0;
@@ -203,6 +211,27 @@ button:disabled { opacity: .5; cursor: default; }
 #lg-body .breed { margin-left: 8px; font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 5px; border: 1px solid #3b3f5c; background: var(--panel-2); color: var(--text); }
 #lg-body .err { color: #f87171; font-size: 12px; margin-top: 3px; }
 #lg-body .cats { flex-wrap: wrap; }
+#lg-body .skins { margin-top: 8px; padding-top: 12px; border-top: 1px solid #2f3352; font-size: 13px; }
+#lg-body .skins h3 { margin: 0 0 4px; font-size: 14px; }
+#lg-body .skins .acts { display: flex; gap: 8px; margin: 10px 0 4px; }
+#lg-body .skins button, #lg-body .skins .file {
+  font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #3b3f5c; cursor: pointer; background: var(--panel-2); color: var(--text);
+}
+#lg-body .skins button.primary { background: var(--accent); border-color: var(--accent); color: #1f2233; font-weight: 700; }
+#lg-body .skins li { gap: 12px; }
+#lg-body .skins li > div:nth-child(2) { flex: 1; min-width: 0; }
+#lg-body .skins .del { flex: none; }
+#lg-body .skins .del:hover { background: #4a2e3a; }
+#lg-body .skins .del.armed { background: #b4413c; border-color: #b4413c; color: #fff; }
+#lg-body .draft { margin: 8px 0; padding: 10px 12px; border: 1px dashed #3b3f5c; border-radius: 8px; }
+#lg-body .draft .fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+#lg-body .draft input { font: inherit; font-size: 12px; padding: 2px 6px; border-radius: 5px; border: 1px solid #3b3f5c; background: var(--panel-2); color: var(--text); }
+#lg-body .draft input[name=name] { width: 140px; }
+#lg-body .draft input[type=number] { width: 52px; }
+#lg-body .draft .frames { list-style: none; margin: 8px 0 0; padding: 0; }
+#lg-body .draft .frames li { display: flex; align-items: flex-end; gap: 6px; padding: 3px 0; border: 0; font-size: 12px; }
+#lg-body .draft .frames li > span:first-child { flex: none; width: 170px; color: var(--dim); }
+#lg-body .draft .frames canvas { image-rendering: pixelated; background: #cdb089; border-radius: 3px; }
 
 /* ---- reply dialog (full agent answer, markdown) ---- */
 #reply {

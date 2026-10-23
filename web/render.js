@@ -1,6 +1,6 @@
 import { TILE, WALL_RISE } from './layout.js';
 import { drawReception, drawBox } from './tilemap.js';
-import { sprite, outline, OUTLINE_W, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf } from './sprites.js';
+import { sprite, spriteSize, outline, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf } from './sprites.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
@@ -161,10 +161,8 @@ function drawReceptionist(g, geo, rc, ents, t) {
   const RECEPTIONIST = rc.cat, RECEPTION = rc.counter;
   const img = sprite(RECEPTIONIST_PAL, greeting ? 'wait' : 'idle', Math.floor(t / (greeting ? 400 : 450)));
   const x = RECEPTIONIST.x * TILE + Math.round((TILE - img.width) / 2);
-  const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // bottom 4 rows tuck behind the counter
+  const y = (RECEPTIONIST.y + 1) * TILE + 5 - img.height; // its lower body tucks behind the counter
   g.drawImage(img, x, y);
-  g.fillStyle = '#3a3d55'; g.fillRect(x + 1, y + 1, 6, 1); g.fillRect(x, y + 2, 1, 2); // headset band + earpiece
-  g.fillStyle = '#f2c94c'; g.fillRect(x + 1, y + 4, 2, 1); // mic
   drawReception(g, RECEPTION.x * TILE, RECEPTION.y * TILE, RECEPTION.w * TILE, false); // shadow is already in the background
 }
 
@@ -215,31 +213,34 @@ function drawEntity(g, geo, e, t, selected, hovered) {
   const rate = anim === 'walk' ? 90 : anim === 'type' ? (auto ? 100 : 160) : anim === 'bat' ? 260 : act === 'scratch' ? 240 : anim === 'write' ? 500 : 450;
   const frame = Math.floor((t + e.seed) / rate);
   // pacing follows the base animation; seats facing away from the viewer swap in back-view frames, desk chairs profile ones
-  const look = !stationKind ? anim : e.station.back ? backAnim(e.pal.kind, anim) : e.station.face ? sideAnim(e.pal.kind, anim) : anim;
+  const look = !stationKind ? anim : e.station.back ? backAnim(e.pal, anim) : e.station.face ? sideAnim(e.pal, anim) : anim;
   const img = sprite(e.pal, look, frame);
+  const { w, h } = spriteSize(img); // world size: uploaded skins are scaled to a cat's height
   const flip = (anim === 'walk' && e.dir < 0 && act !== 'wheel') || (stationKind && e.station.face === 'left');
   const isAsst = e.kind === 'assistant';
   // centered on the tile, feet on the shadow line, unless it sits on something (SEAT_Y)
   const seatY = SEAT_Y[act || stationKind] ?? 14;
   // horizontally centered, except: paws against the post on the next tile, or centered in the 2-tile wheel
-  const ox = act === 'scratch' ? TILE + 5 - img.width : act === 'wheel' ? TILE - Math.round(img.width / 2) : Math.round((TILE - img.width) / 2);
-  const oy = seatY - img.height;
+  const ox = act === 'scratch' ? TILE + 5 - w : act === 'wheel' ? TILE - Math.round(w / 2) : Math.round((TILE - w) / 2);
+  const oy = seatY - h;
+  e.headTop = oy; e.spriteH = h; // for the speech bubble and hit testing (skins can be taller than a cat)
   const bob = !moving && (anim === 'idle' || anim === 'read' || anim === 'sit') && Math.floor((t + e.seed) / 700) % 2 ? 1 : 0;
   g.globalAlpha = e.alpha;
-  if (seatY === 14) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, img.width, 2); } // furniture casts its own
+  if (seatY === 14) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(e.x + ox, e.y + 14, w, 2); } // furniture casts its own
   const ring = selected ? outline(img, '#ffd166') : hovered ? outline(img, 'rgba(255,255,255,0.7)') : null;
+  const rs = ring && spriteSize(ring), rp = ring && (rs.w - w) / 2; // the ring's margin, in world px
   if (flip) {
-    g.save(); g.translate(e.x + ox + img.width, e.y + oy + bob); g.scale(-1, 1);
-    if (ring) g.drawImage(ring, -OUTLINE_W, -OUTLINE_W);
-    g.drawImage(img, 0, 0); g.restore();
+    g.save(); g.translate(e.x + ox + w, e.y + oy + bob); g.scale(-1, 1);
+    if (ring) g.drawImage(ring, -rp, -rp, rs.w, rs.h);
+    g.drawImage(img, 0, 0, w, h); g.restore();
   } else {
-    if (ring) g.drawImage(ring, e.x + ox - OUTLINE_W, e.y + oy + bob - OUTLINE_W);
-    g.drawImage(img, e.x + ox, e.y + oy + bob);
+    if (ring) g.drawImage(ring, e.x + ox - rp, e.y + oy + bob - rp, rs.w, rs.h);
+    g.drawImage(img, e.x + ox, e.y + oy + bob, w, h);
   }
   if (act === 'box') { const b = geo.boxes.find((x) => x.id === e.station.of); if (b) drawBox(g, b.x * TILE, b.y * TILE, true); } // box front over the cat's lower body
-  if (stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + img.width, e.y + oy + img.height - 4 + bob, t + e.seed);
+  if (stationKind === 'lounge') drawGlyph(g, 'cup', e.x + ox + w, e.y + oy + h - 4 + bob, t + e.seed);
   // indicators above the head
-  const gx = e.x + ox + Math.floor(img.width / 2) - 3, gy = e.y + oy - 4;
+  const gx = e.x + ox + Math.floor(w / 2) - 3, gy = e.y + oy - 4;
   if (!moving) {
     if (state === 'thinking') drawGlyph(g, 'dots', gx, gy, t + e.seed);
     else if (state === 'waiting') drawGlyph(g, 'bang', gx + 2, gy - 3, t);
@@ -303,7 +304,8 @@ function drawBubble(ctx, S, e, now, placed, W) {
   const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2;
   const bh = lines.length * lh + pad * 2;
   const isAsst = e.kind === 'assistant';
-  const headX = (e.x + 8) * S, headY = (e.y + (isAsst ? 5 : 2) - 7) * S;
+  const lift = -Math.max(0, (e.spriteH ?? 0) - (isAsst ? 8 : 10)); // taller than a cat: raise the bubble by the difference
+  const headX = (e.x + 8) * S, headY = (e.y + (isAsst ? 5 : 2) - 7 + lift) * S;
   let bx = Math.round(headX - bw / 2), by = Math.round(headY - bh - 3 * S);
   bx = Math.max(2 * S, Math.min(W * S - bw - 2 * S, bx));
   if (by < 18 * S) by = 18 * S;

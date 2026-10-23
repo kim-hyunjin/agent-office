@@ -1,6 +1,6 @@
 import { TILE, WALL_RISE, compile, DEFAULT_OFFICE } from './layout.js';
 import { buildBackground } from './tilemap.js';
-import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices, sprite } from './sprites.js';
+import { paletteFor, hashStr, familyOf, FAMILIES, setBreedChoices, setSkins, onSkinLoad, sprite } from './sprites.js';
 import { step, clamp } from './anim.js';
 import { render, STATE_LABEL, HUD_BTN } from './render.js';
 import { Editor } from './editor.js';
@@ -18,6 +18,7 @@ const canvas = document.getElementById('office');
 const tabsEl = document.getElementById('tabs');
 const barEl = document.getElementById('bar'); // office tabs + the tool buttons, above the office
 const toolsEl = document.getElementById('tools');
+const stageEl = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
 const tip = document.getElementById('tip');
 const panel = new Panel(document.getElementById('panel'), {
@@ -104,16 +105,42 @@ const PANEL_ANIM_MS = 220; // keep in sync with the #panel / #office.refit trans
 // Width the open panel takes from the office. On narrow windows the panel just covers it.
 const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >= PANEL_W * 2 ? PANEL_W : 0);
 
+// Whole-number zoom, like pixel-art games: every art pixel is the same size on screen. Fit: at least MIN_SCALE, more
+// when the window has room; an office bigger than the window scrolls instead of shrinking its pixels. The −/+ buttons
+// pin a zoom instead (remembered per browser); the zoom button between them goes back to fitting.
+const MIN_SCALE = 2, MAX_SCALE = 8;
+let zoom = null; // pinned scale, or null: fit the window
+try { const z = Math.round(Number(localStorage.getItem('pawgents.zoom'))); zoom = z >= 1 ? Math.min(z, MAX_SCALE) : null; } catch { /* storage blocked */ }
 function fitScale() {
+  if (zoom) return zoom;
   const ticker = document.getElementById('ticker');
   const availW = window.innerWidth - 16 - panelRoom();
   const availH = window.innerHeight - 12 - (ticker.hidden ? 0 : ticker.offsetHeight) - barEl.offsetHeight;
-  // Fill the space. Fractional scale is fine: text is drawn in screen space and pixel art stays nearest-neighbour.
-  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H) * 20) / 20, 1, 8);
+  return clamp(Math.floor(Math.min(availW / world.view.geo.W, availH / world.view.geo.VIEW_H)), MIN_SCALE, MAX_SCALE);
+}
+const zoomBtn = document.getElementById('t-zoom');
+function setZoom(z) {
+  zoom = z ? clamp(z, 1, MAX_SCALE) : null;
+  try { if (zoom) localStorage.setItem('pawgents.zoom', zoom); else localStorage.removeItem('pawgents.zoom'); } catch { /* storage blocked */ }
+  resize();
+}
+document.getElementById('t-zoom-out').addEventListener('click', () => setZoom(S - 1));
+document.getElementById('t-zoom-in').addEventListener('click', () => setZoom(S + 1));
+zoomBtn.addEventListener('click', () => setZoom(null));
+function showZoom() {
+  zoomBtn.textContent = `${S}×`;
+  zoomBtn.classList.toggle('pinned', !!zoom);
+  zoomBtn.title = zoom ? '눌러서 창 크기에 맞추기' : '창 크기에 맞춘 배율';
+  document.getElementById('t-zoom-out').disabled = S <= 1;
+  document.getElementById('t-zoom-in').disabled = S >= MAX_SCALE;
 }
 
+/** The ticker (bottom) and the panel (right) float over the page: pad the page so the office can scroll out from under them. */
 function placeTicker() {
-  document.getElementById('ticker').style.right = `${panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0}px`;
+  const ticker = document.getElementById('ticker'), side = panel.isOpen || editor.isOpen ? Math.min(PANEL_W, window.innerWidth) : 0;
+  ticker.style.right = `${side}px`;
+  stageEl.style.paddingBottom = `${(ticker.hidden ? 0 : ticker.offsetHeight) + 4}px`;
+  stageEl.style.paddingRight = `${side + 4}px`;
 }
 
 /** Fit the office to the window at once (backing store + CSS size). */
@@ -125,6 +152,7 @@ function resize() {
   canvas.style.width = `${canvas.width}px`; canvas.style.height = `${canvas.height}px`;
   barEl.style.width = canvas.style.width;
   toolsEl.classList.toggle('off', editor.isOpen); // the editor has its own buttons
+  showZoom();
   placeTicker();
 }
 
@@ -454,9 +482,15 @@ async function setTogether(officeId, btn) {
   } catch (e) { btn.title = `실패: ${e.message}`; } finally { btn.disabled = false; }
 }
 let firstSnapshot = true;
-/** Breed choices changed (snapshot or a 'settings' push): redraw every cat with its family's breed. */
-function applyCatChoices(cats) {
+/** Breed or skin choices changed (snapshot or a 'settings' push): redraw every cat with its family's look. */
+function applyCatChoices({ cats, skins }) {
   setBreedChoices(cats);
+  setSkins(skins);
+  repaintCats();
+}
+// a skin finished loading: families picking it switch from their default breed to it
+onSkinLoad(() => repaintCats());
+function repaintCats() {
   for (const e of world.ents.values()) {
     const s = world.sessions.get(e.sessionId);
     if (!s) continue;
@@ -467,7 +501,7 @@ function applyCatChoices(cats) {
   refreshLegend();
 }
 function applySnapshot(snap) {
-  applyCatChoices(snap.cats);
+  applyCatChoices(snap);
   const seated = firstSnapshot;
   firstSnapshot = false;
   if (seated) for (const s of snap.sessions) world.sessions.set(s.id, s); // so the first office pick sees who works where
@@ -504,7 +538,7 @@ function connect() {
   es.addEventListener('snapshot', (ev) => { world.connected = true; applySnapshot(JSON.parse(ev.data)); });
   es.addEventListener('session', (ev) => upsertSession(JSON.parse(ev.data)));
   es.addEventListener('remove', (ev) => removeSession(JSON.parse(ev.data).id));
-  es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data).cats));
+  es.addEventListener('settings', (ev) => applyCatChoices(JSON.parse(ev.data)));
   es.addEventListener('offices', (ev) => { const d = JSON.parse(ev.data); setOffices(d.offices, d.together); });
   es.onopen = () => {
     world.connected = true;
@@ -520,7 +554,7 @@ function entAt(lx, ly) {
   let best = null;
   for (const e of world.ents.values()) {
     const isA = e.kind === 'assistant';
-    const x0 = e.x + (isA ? 4 : 3), x1 = e.x + (isA ? 12 : 13), y0 = e.y + (isA ? 3 : 0), y1 = e.y + 16;
+    const x0 = e.x + (isA ? 4 : 3), x1 = e.x + (isA ? 12 : 13), y0 = e.y + Math.min(isA ? 3 : 0, e.headTop ?? 0), y1 = e.y + 16;
     if (lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1 && (!best || e.y > best.y)) best = e;
   }
   return best;

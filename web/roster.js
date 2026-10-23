@@ -1,10 +1,10 @@
 // Staff roster: a compact list of every working cat under the HUD — state at a glance, click a row for the
 // detail panel, or send one home (two clicks, like the panel's 퇴근 button). Toggled from the HUD's "목록" button.
 import { STATE_LABEL, STATE_COLOR } from './render.js';
-import { FAMILIES, familyOf, sprite } from './sprites.js';
+import { FAMILIES, familyOf, sprite, spriteSize } from './sprites.js';
 import { esc, closeSession, BUSY } from './panel.js';
 
-const ICON_ZOOM = 3;
+const ICON_ZOOM = 2;
 
 export class Roster {
   /** onPick(id): open that session's detail panel. placeOf(id): where its cat is right now ('' = at its desk). */
@@ -68,8 +68,8 @@ export class Roster {
     const pal = world.ents.get(s.id)?.pal;
     if (pal && pal !== r.pal) { // (re)draw the icon when the cat's palette is known or changes
       r.pal = pal;
-      const img = sprite(pal, 'idle', 0);
-      r.icon.width = img.width * ICON_ZOOM; r.icon.height = img.height * ICON_ZOOM;
+      const img = sprite(pal, 'idle', 0), { w, h } = spriteSize(img);
+      r.icon.width = Math.round(w * ICON_ZOOM); r.icon.height = Math.round(h * ICON_ZOOM);
       const g = r.icon.getContext('2d'); g.imageSmoothingEnabled = false;
       g.drawImage(img, 0, 0, r.icon.width, r.icon.height);
     }
