@@ -1,6 +1,8 @@
 // "새 직원" dialog: start a claude session in an Orca worktree via the server's /orca/launch.
 // Opened from the #t-new toolbar button.
 import { MAX_HIRES, WORKTREE_NAME_RE } from './limits.js';
+import { api, post } from './api.js';
+import { esc, setMsg as setMsgOn, bindDialogClose, storage } from './ui.js';
 
 const dlg = document.getElementById('launcher');
 const form = document.getElementById('l-form');
@@ -19,24 +21,17 @@ countIn.max = MAX_HIRES; // the one copy of the limit: index.html leaves max off
 let worktrees = [];
 
 const LAST_KEY = 'pawgents-office:last-worktree';
-const store = {
-  get() { try { return localStorage.getItem(LAST_KEY) || ''; } catch { return ''; } },
-  set(v) { try { localStorage.setItem(LAST_KEY, v); } catch { /* private mode */ } },
-};
-
-function setMsg(text, kind = '') { msg.textContent = text; msg.className = `msg ${kind}`; }
+const setMsg = (text, kind = '') => setMsgOn(msg, text, kind);
 
 async function loadWorktrees() {
   sel.disabled = true;
   sel.innerHTML = '<option value="">불러오는 중…</option>';
   try {
-    const r = await fetch('/orca/worktrees');
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    const d = await api('/orca/worktrees');
     const list = d.worktrees || [];
     if (!list.length) throw new Error('Orca에 등록된 워크트리가 없습니다.');
     worktrees = list;
-    const last = store.get();
+    const last = storage.get(LAST_KEY) || '';
     sel.innerHTML = list.map((w) => {
       const label = `${w.repo}${w.branch ? ` · ${w.branch}` : ''}${w.name && w.name !== w.branch ? ` (${w.name})` : ''}`;
       return `<option value="${esc(w.id)}" title="${esc(w.path)}"${w.id === last ? ' selected' : ''}>${esc(label)}</option>`;
@@ -81,8 +76,7 @@ export function openLauncher() {
   loadWorktrees();
   prompt.focus();
 }
-document.getElementById('l-cancel').addEventListener('click', () => dlg.close());
-dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+bindDialogClose(dlg, document.getElementById('l-cancel'));
 prompt.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
 });
@@ -97,17 +91,11 @@ form.addEventListener('submit', async (e) => {
   submit.disabled = true;
   setMsg(newWt.checked ? `워크트리를 만들고 ${count}명 채용하는 중… (조금 걸려요)` : `Orca에서 ${count}명 시작하는 중…`);
   try {
-    const r = await fetch('/orca/launch', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        worktreeId: sel.value, model: model.value.trim(), prompt: prompt.value.trim(), count,
-        newWorktree: newWt.checked ? { name } : null,
-      }),
+    const d = await post('/orca/launch', {
+      worktreeId: sel.value, model: model.value.trim(), prompt: prompt.value.trim(), count,
+      newWorktree: newWt.checked ? { name } : null,
     });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-    store.set(sel.value);
+    storage.set(LAST_KEY, sel.value);
     if (d.errors?.length) { // some hires failed: keep the dialog open with what went wrong
       setMsg(`${d.started}명 시작, ${d.errors.length}명 실패:\n${d.errors.join('\n')}`, 'err');
       submit.disabled = false;
@@ -120,5 +108,3 @@ form.addEventListener('submit', async (e) => {
     submit.disabled = false;
   }
 });
-
-function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

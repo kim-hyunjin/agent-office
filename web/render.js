@@ -1,6 +1,7 @@
 import { TILE, WALL_RISE } from './layout.js';
 import { drawReception, drawBox } from './tilemap.js';
 import { sprite, spriteSize, outline, animFor, backAnim, sideAnim, RECEPTIONIST_PAL, drawGlyph, FAMILIES, familyOf } from './sprites.js';
+import { fmtTime } from './ui.js';
 
 const FONT = '"Galmuri11", "DotumChe", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SCREEN = {
@@ -349,7 +350,7 @@ function drawHUD(ctx, S, world, now) {
   ctx.fillStyle = '#f3f4f6'; ctx.fillText(text, x0 + 7 * S, 7 * S);
   ctx.fillStyle = '#ffd166'; ctx.fillText(toggle, x0 + 7 * S + tw + 5 * S, 7 * S);
   world.hudBtn = { x: x0 / S, y: 2 - WALL_RISE, w: w / S, h: 10 }; // office px (the HUD hangs above the office origin)
-  const clock = new Date(now).toTimeString().slice(0, 8);
+  const clock = fmtTime(now);
   ctx.textAlign = 'right';
   const cw = ctx.measureText(clock).width + 6 * S;
   const cx = (world.view.geo.W - TILE) * S - 2 * S;

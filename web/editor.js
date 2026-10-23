@@ -5,7 +5,8 @@
 // saving sends the draft to the server, which pushes it to every open office.
 import { TILE, WALL_RISE, ROOM_TYPES, ITEM_KINDS, DEFAULT_OFFICE, MIN_W, MIN_H, MAX_W, MAX_H, cloneOffice, normalize, compile, validate, itemRect, ringRect, DOOR_SIDES, doorFor, doorTiles } from './layout.js';
 import { buildBackground, FLOOR } from './tilemap.js';
-import { esc } from './panel.js';
+import { api, post } from './api.js';
+import { esc, setMsg, downloadBlob } from './ui.js';
 import { MAX_NAME_CHARS } from './limits.js';
 
 const $ = (id) => document.getElementById(id);
@@ -469,13 +470,9 @@ export class Editor {
   }
   exportFile() {
     const name = (this.name.trim() || this.office.name).replace(/[\\/:*?"<>|\s]+/g, '-');
-    const a = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(new Blob([this.shareText()], { type: 'application/json' })),
-      download: `pawgents-office-${name}.json`,
-    });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    this.msg(`${a.download} 로 내보냈어요.`, 'ok');
+    const file = `pawgents-office-${name}.json`;
+    downloadBlob(new Blob([this.shareText()], { type: 'application/json' }), file);
+    this.msg(`${file} 로 내보냈어요.`, 'ok');
   }
   /** Shared JSON (or a bare layout) → draft. `from` reads like "붙여넣은" / "x.json의". */
   importText(text, from) {
@@ -540,16 +537,12 @@ export class Editor {
       : this.tool.startsWith('item:') ? '놓을 곳을 누르세요. 여러 개 놓을 수 있어요. (Esc·우클릭: 그만 놓기)'
         : '가구·방을 끌어서 옮기고, Delete로 지우고, 방향키로 한 칸씩 움직여요. Ctrl+Z: 되돌리기';
   }
-  msg(text, cls = '') { const m = $('ed-msg'); m.textContent = text; m.className = `msg ${cls}`; }
+  msg(text, cls = '') { setMsg($('ed-msg'), text, cls); }
 
   async save() {
     if (this.errs.length || this.saving) return;
     this.saving = true; this.syncPanel(); this.msg('저장 중…');
     const id = encodeURIComponent(this.office.id);
-    const post = async (url, body, method = 'POST') => {
-      const r = await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-    };
     try {
       const name = this.name.trim();
       if (name !== this.office.name) await post(`/offices/${id}`, { name });
@@ -571,8 +564,7 @@ export class Editor {
       return;
     }
     try {
-      const r = await fetch(`/offices/${encodeURIComponent(this.office.id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      await api(`/offices/${encodeURIComponent(this.office.id)}`, { method: 'DELETE', body: {} }); // the server wants a JSON body here (CSRF guard)
       this.close();
     } catch (e) { this.msg(`닫기 실패: ${e.message}`, 'err'); }
   }

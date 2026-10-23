@@ -1,6 +1,8 @@
 import { STATE_LABEL, STATE_COLOR } from './render.js';
 import { FAMILIES, familyOf } from './sprites.js';
 import { openReply, refreshReply } from './reply.js';
+import { api, post, closeSession } from './api.js';
+import { esc, fmtTime, setMsg } from './ui.js';
 
 export const ICON = {
   Read: '📖', Grep: '🔍', Glob: '🔍', LS: '📂', Edit: '✏️', Write: '✏️', MultiEdit: '✏️', NotebookEdit: '✏️',
@@ -61,8 +63,8 @@ export class Panel {
     this.renderMeta(session);
     this.addEntries(session.log || []);
     try {
-      const r = await fetch(`/sessions/${encodeURIComponent(session.id)}/log`);
-      if (r.ok) { const d = await r.json(); if (this.id === session.id) this.addEntries(d.log || []); }
+      const d = await api(`/sessions/${encodeURIComponent(session.id)}/log`);
+      if (this.id === session.id) this.addEntries(d.log || []);
     } catch { /* server restarted — SSE will refill */ }
   }
 
@@ -88,10 +90,7 @@ export class Panel {
 
   remove(id) { this.drafts.delete(id); if (id === this.id) this.close(); }
 
-  setComposeMsg(text, kind = '') {
-    this.composeMsg.textContent = text;
-    this.composeMsg.className = `msg ${kind}`;
-  }
+  setComposeMsg(text, kind = '') { setMsg(this.composeMsg, text, kind); }
 
   /** Type the composer text into the session's Orca terminal. */
   async send() {
@@ -101,11 +100,7 @@ export class Panel {
     this.sendBtn.disabled = true;
     this.setComposeMsg('보내는 중…');
     try {
-      const r = await fetch(`/sessions/${encodeURIComponent(id)}/prompt`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      await post(`/sessions/${encodeURIComponent(id)}/prompt`, { text });
       this.drafts.delete(id);
       if (this.id === id) { this.input.value = ''; this.setComposeMsg('전달됨 ✓', 'ok'); }
     } catch (e) {
@@ -275,17 +270,6 @@ export function bgSummary(s) {
   return `백그라운드 작업 대기 · ${what}${tasks.length > 1 ? ` 외 ${tasks.length - 1}개` : ''}`;
 }
 
-/** Send a session home. force: close its Orca terminal tab instead of typing /exit (it isn't idle). */
-export async function closeSession(id, force) {
-  const r = await fetch(`/sessions/${encodeURIComponent(id)}/close`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force }),
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-}
-
-export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-export function fmtTime(t) { return new Date(t).toTimeString().slice(0, 8); }
 function fmtLen(n) { return n >= 1024 ? `${(n / 1024).toFixed(1)}KB` : `${n}자`; }
 function fmtDur(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));

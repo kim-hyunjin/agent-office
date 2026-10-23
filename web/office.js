@@ -7,7 +7,9 @@ import { Editor } from './editor.js';
 import { openLegend, refreshLegend } from './legend.js';
 import { Roster } from './roster.js';
 import { openLauncher } from './launcher.js';
-import { Panel, ICON, EV_ICON, esc, fmtTime, awaitingBg, bgSummary } from './panel.js';
+import { Panel, ICON, EV_ICON, awaitingBg, bgSummary } from './panel.js';
+import { post } from './api.js';
+import { esc, fmtTime, pic, storage } from './ui.js';
 
 const params = new URLSearchParams(location.search);
 const PLAY_AFTER_MS = Number(params.get('playAfter') || 15) * 1000; // idle this long → off to play / lounge
@@ -110,7 +112,7 @@ const panelRoom = () => ((panel.isOpen || editor.isOpen) && window.innerWidth >=
 // pin a zoom instead (remembered per browser); the zoom button between them goes back to fitting.
 const MIN_SCALE = 2, MAX_SCALE = 8;
 let zoom = null; // pinned scale, or null: fit the window
-try { const z = Math.round(Number(localStorage.getItem('pawgents.zoom'))); zoom = z >= 1 ? Math.min(z, MAX_SCALE) : null; } catch { /* storage blocked */ }
+{ const z = Math.round(Number(storage.get('pawgents.zoom'))); zoom = z >= 1 ? Math.min(z, MAX_SCALE) : null; }
 function fitScale() {
   if (zoom) return zoom;
   const ticker = document.getElementById('ticker');
@@ -121,7 +123,7 @@ function fitScale() {
 const zoomBtn = document.getElementById('t-zoom');
 function setZoom(z) {
   zoom = z ? clamp(z, 1, MAX_SCALE) : null;
-  try { if (zoom) localStorage.setItem('pawgents.zoom', zoom); else localStorage.removeItem('pawgents.zoom'); } catch { /* storage blocked */ }
+  if (zoom) storage.set('pawgents.zoom', zoom); else storage.remove('pawgents.zoom');
   resize();
 }
 document.getElementById('t-zoom-out').addEventListener('click', () => setZoom(S - 1));
@@ -424,7 +426,7 @@ function setOffices(list, together = null) {
 }
 function preferredOffice() {
   let want = params.get('office');
-  if (!want) try { want = localStorage.getItem(OFFICE_KEY); } catch { /* storage blocked */ }
+  if (!want) want = storage.get(OFFICE_KEY);
   if (officeOf(want)) return want;
   // otherwise the busiest office
   const n = (o) => [...world.sessions.values()].filter((s) => !s.ended && s.officeId === o.id).length;
@@ -435,7 +437,7 @@ function switchOffice(id) {
   const o = officeOf(id);
   if (!o) return;
   world.officeId = id;
-  try { localStorage.setItem(OFFICE_KEY, id); } catch { /* storage blocked */ }
+  storage.set(OFFICE_KEY, id);
   if (params.has('office')) { params.set('office', id); history.replaceState(null, '', `?${params}${location.hash}`); }
   world.ents.clear();
   world.hoverKey = null;
@@ -476,10 +478,7 @@ tabsEl.addEventListener('click', (ev) => {
 /** Gather everyone in one office (null: split up by repo). The server moves the staff and pushes the result. */
 async function setTogether(officeId, btn) {
   btn.disabled = true;
-  try {
-    const r = await fetch('/settings/together', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ officeId }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
-  } catch (e) { btn.title = `실패: ${e.message}`; } finally { btn.disabled = false; }
+  try { await post('/settings/together', { officeId }); } catch (e) { btn.title = `실패: ${e.message}`; } finally { btn.disabled = false; }
 }
 let firstSnapshot = true;
 /** Breed or skin choices changed (snapshot or a 'settings' push): redraw every cat with its family's look. */
@@ -660,10 +659,7 @@ document.getElementById('t-edit').addEventListener('click', () => { // layout ed
   editor.open(officeOf(world.officeId));
 });
 { // the legend button wears a cat, like the legend itself
-  const icon = sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0), c = document.createElement('canvas');
-  c.width = icon.width; c.height = icon.height; c.style.width = `${icon.width}px`; c.style.height = `${icon.height}px`;
-  c.getContext('2d').drawImage(icon, 0, 0);
-  document.getElementById('t-legend').prepend(c);
+  document.getElementById('t-legend').prepend(pic(sprite(paletteFor('legend', 'employee', 'claude-fable'), 'idle', 0)));
 }
 
 // ---- loop ----------------------------------------------------------------------

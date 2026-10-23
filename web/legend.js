@@ -2,10 +2,11 @@
 // breed picker; the choice is saved on the server and pushed to every open office (office.js applies it). Also shows
 // the kittens (subagents) and the receptionist, and manages uploaded skins: PNG sprite sheets that can stand in for a breed (format in sprites.js SKIN_ROWS / README).
 import {
-  FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, spriteSize, breedPalette, RECEPTIONIST_PAL,
+  FAMILIES, BREEDS, familyOf, breedOf, choiceOf, sprite, breedPalette, RECEPTIONIST_PAL,
   SKIN_ROWS, SKIN_ROW_LABEL, skinList, sliceSheet, skinTemplate, skinScale,
 } from './sprites.js';
-import { esc } from './panel.js';
+import { post } from './api.js';
+import { esc, pic, downloadBlob, bindDialogClose } from './ui.js';
 import { MAX_NAME_CHARS, MAX_SKIN_BYTES, MIN_CELL, MAX_CELL, isCell, skinGridError } from './limits.js';
 
 const dlg = document.getElementById('legend');
@@ -13,20 +14,9 @@ const body = document.getElementById('lg-body');
 const MONITOR = { 'wide-gold': '금색 와이드 모니터', silver: '실버 모니터', normal: '일반 모니터', laptop: '노트북' };
 const ZOOM = 2;
 
-document.getElementById('lg-close').addEventListener('click', () => dlg.close());
-dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+bindDialogClose(dlg, document.getElementById('lg-close'));
 
-/** A drawable (sprite frame or skin frame) as a scaled-up <canvas>, sized by its world size. */
-function pic(img, zoom = ZOOM) {
-  const { w, h } = spriteSize(img);
-  const c = document.createElement('canvas');
-  c.width = Math.round(w * zoom); c.height = Math.round(h * zoom);
-  const g = c.getContext('2d');
-  g.imageSmoothingEnabled = false;
-  g.drawImage(img, 0, 0, c.width, c.height);
-  return c;
-}
-const cat = (pal, anim = 'idle') => pic(sprite(pal, anim, 0));
+const cat = (pal, anim = 'idle') => pic(sprite(pal, anim, 0), ZOOM);
 
 /** Pictures for a breed or skin: every coat of a breed, or a skin's seated and walking frames. */
 function looks(breed, kind = 'employee') {
@@ -44,12 +34,6 @@ function row(cats, title, lines) {
   text.innerHTML = `<b>${title}</b>${lines.map((l) => `<div class="dim">${l}</div>`).join('')}`;
   li.append(pics, text);
   return li;
-}
-
-async function post(url, data) {
-  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-  return r.json();
 }
 
 /** Breed <select> for a model family (uploaded skins in their own group); picking one asks the server to save it. */
@@ -162,11 +146,7 @@ function skinRow(s) {
   return li;
 }
 
-async function downloadTemplate() {
-  const url = URL.createObjectURL(await skinTemplate());
-  Object.assign(document.createElement('a'), { href: url, download: 'pawgents-skin-template.png' }).click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+async function downloadTemplate() { downloadBlob(await skinTemplate(), 'pawgents-skin-template.png'); }
 
 /** A cell size the sheet divides into evenly, with a sensible row count; 16 if nothing fits. */
 function guessCell(w, h) {

@@ -1,7 +1,8 @@
 // Full agent reply in a large dialog, markdown rendered. Opened from the panel's last-reply card.
 // The full text is fetched on demand (/sessions/:id/reply) — SSE only carries the short preview.
 import { renderMarkdown } from './markdown.js';
-import { fmtTime } from './panel.js';
+import { api } from './api.js';
+import { fmtTime, bindDialogClose } from './ui.js';
 
 const dlg = document.getElementById('reply');
 const nameEl = document.getElementById('r-name');
@@ -14,8 +15,7 @@ const composeHome = compose.parentNode, composeNext = compose.nextSibling;
 
 let cur = null; // { id, at, text }
 
-document.getElementById('r-close').addEventListener('click', () => dlg.close());
-dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+bindDialogClose(dlg, document.getElementById('r-close'));
 dlg.addEventListener('close', () => {
   cur = null;
   composeHome.insertBefore(compose, composeNext); // hand the composer back to the panel
@@ -46,10 +46,7 @@ export function refreshReply(s) {
 async function load(s) {
   const id = s.id;
   let d = null;
-  try {
-    const r = await fetch(`/sessions/${encodeURIComponent(id)}/reply`);
-    if (r.ok) d = await r.json();
-  } catch { /* server unreachable — fall back to the preview below */ }
+  try { d = await api(`/sessions/${encodeURIComponent(id)}/reply`); } catch { /* server unreachable — fall back to the preview below */ }
   if (cur?.id !== id) return;
   // The SSE preview is cut at 280 chars; say so rather than pass it off as the whole answer.
   const partial = !d;
