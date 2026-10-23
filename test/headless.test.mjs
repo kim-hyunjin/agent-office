@@ -140,3 +140,24 @@ test('runner: hello, prompt -> ack + result, status, close -> exit 0, run file r
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
+
+test('childEnv drops the parent claude/Orca session vars and points hooks at this server', async () => {
+  const { childEnv, stripClaudeEnv } = await import('../server/backends/headless.mjs');
+  const { PORT, DATA_DIR } = await import('../server/config.mjs');
+  const parent = { PATH: '/bin', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_SSE_PORT: '123', ORCA_TERMINAL_HANDLE: 't1', PAWGENTS_OFFICE_PORT: '1', KEEP: 'x' };
+  const env = childEnv(parent);
+  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'ORCA_TERMINAL_HANDLE']) assert.equal(k in env, false, k);
+  assert.equal(env.PAWGENTS_OFFICE_PORT, String(PORT)); assert.equal(env.PAWGENTS_OFFICE_DATA, DATA_DIR);
+  assert.equal(env.KEEP, 'x'); assert.equal(env.PATH, '/bin');
+  assert.equal('CLAUDECODE' in parent, true); // the caller's env is left alone
+  if (process.platform === 'win32') assert.equal('ClaudeCode' in stripClaudeEnv({ ClaudeCode: '1' }), false);
+});
+
+test('backend errors map to HTTP statuses', async () => {
+  const { backendStatus, backendError } = await import('../server/http.mjs');
+  for (const c of ['terminal_not_found', 'not_claude', 'headless_exit', 'detached', 'headless_unavailable', 'git_failed']) assert.equal(backendStatus(c), 409, c);
+  assert.equal(backendStatus('ENOENT'), 502); assert.equal(backendStatus('orca_failed'), 502); assert.equal(backendStatus(undefined), 502);
+  const res = { writeHead(status) { this.status = status; }, end(body) { this.body = JSON.parse(body); } };
+  backendError(res, Object.assign(new Error('gone'), { code: 'detached' }));
+  assert.equal(res.status, 409); assert.deepEqual(res.body, { error: 'gone', code: 'detached' });
+});

@@ -40,6 +40,15 @@ export async function listGitWorktrees(roots) {
   return all.sort((a, b) => a.repo.localeCompare(b.repo) || b.isMain - a.isMain || a.path.localeCompare(b.path));
 }
 
+export const samePath = (a, b) => norm(a) === norm(b);
+
+/** Worktrees of the repo containing `dir`, in git's order: the main worktree (real-case path) comes first unless bare. */
+export async function worktreesAt(dir) {
+  try { return parseWorktrees((await run('git', ['-C', dir, 'worktree', 'list', '--porcelain'], { timeout: 5000, windowsHide: true })).stdout, dir); } catch (e) {
+    throw Object.assign(new Error(String(e.stderr || e.message).trim().slice(0, 300) || 'git worktree list failed'), { code: 'git_failed' });
+  }
+}
+
 /** New worktree on a new branch `name`, next to the repo as `<repo>-<name>`. */
 export async function addWorktree({ repoRoot, name, base }) {
   const dir = path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}-${name}`);

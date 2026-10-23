@@ -9,12 +9,16 @@ import { pollRegistry } from './registry.mjs';
 import { Tailer } from './transcript.mjs';
 import { decode } from './util.mjs';
 import { makeRoutes } from './routes.mjs';
+import { headless } from './backends/index.mjs';
 
 const store = new Store();
 store.load();
 const sse = new Sse();
 store.on((type, data) => sse.send(type, data));
 const tailer = new Tailer(store);
+
+// Headless runners outlive the server: reattach before the registry poll, so their sessions come back as headless.
+const restored = await headless.restore(store).catch((e) => { console.error('[headless] restore failed:', e.message); return 0; });
 
 // Boot: rebuild from the live session registry + transcripts before accepting clients; worked files come from git status.
 pollRegistry(store);
@@ -61,6 +65,7 @@ server.listen(PORT, HOST, () => {
   console.log(`pawgents-office  →  http://${HOST}:${PORT}`);
   console.log(`desk memory: ${STATE_FILE}`);
   console.log(`sessions restored: ${store.sessions.size}`);
+  console.log(`headless restored: ${restored}`);
 });
 
 setInterval(() => store.gc(), GC_INTERVAL_MS).unref();
@@ -69,5 +74,5 @@ setInterval(() => tailer.tick(), TRANSCRIPT_POLL_MS).unref();
 setInterval(() => syncAllFiles(store), FILES_SYNC_MS).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { store.saveNow(); process.exit(0); });
+  process.on(sig, () => { headless.shutdown(); store.saveNow(); process.exit(0); }); // runners keep their claude running
 }

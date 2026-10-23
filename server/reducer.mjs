@@ -42,7 +42,8 @@ function apply(store, ev) {
   s.hookEvents++;
   s.lastEventAt = now;
   if (ev.permission_mode) s.permissionMode = ev.permission_mode;
-  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal) store.setTerminal(s, ev.orca_terminal);
+  // a headless session inherits no terminal; a stray handle (server started inside Orca) must not bind it to one
+  if (typeof ev.orca_terminal === 'string' && ev.orca_terminal && s.backend !== 'headless') store.setTerminal(s, ev.orca_terminal);
 
   const agentId = ev.agent_id ? String(ev.agent_id) : null;
   const agent = agentId ? store.getOrCreateSubagent(s, agentId, { type: ev.agent_type }) : null;

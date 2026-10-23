@@ -1,10 +1,9 @@
-// Picks how sessions are run: Orca CLI or a headless `claude -p` (stub until the runner lands).
+// Picks how sessions are run: Orca CLI (claude in an Orca terminal) or headless `claude -p` behind a per-session runner.
 import * as orca from './orca.mjs';
+import * as headless from './headless.mjs';
 import { BACKEND } from '../config.mjs';
 
-const headless = { probe: async () => ({ available: false, reason: '아직 지원하지 않습니다.' }) };
-
-export { orca };
+export { orca, headless };
 
 export async function backends() {
   const [o, h] = await Promise.all([orca.probe(), headless.probe()]);
@@ -13,3 +12,6 @@ export async function backends() {
   const def = forced && ok[BACKEND] ? BACKEND : ok.orca ? 'orca' : ok.headless ? 'headless' : null;
   return { orca: o, headless: h, default: def, forced };
 }
+
+/** The backend that can drive session `s`: null for a headless session whose runner we aren't connected to (yet). */
+export const forSession = (s) => s.backend === 'headless' ? (headless.has(s.id) ? headless : null) : orca;

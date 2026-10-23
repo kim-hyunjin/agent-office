@@ -60,4 +60,7 @@ export function findSession(store, res, id, { live = false, msg = 'not found' } 
   return s;
 }
 
-export const orcaError = (res, e) => json(res, e.code === 'terminal_not_found' || e.code === 'not_claude' ? 409 : 502, { error: e.message, code: e.code });
+// Backend failures the user can act on (wrong tab, claude died, runner not attached, git refused) are 409; the rest is upstream trouble.
+export const BACKEND_ERROR_STATUS = { terminal_not_found: 409, not_claude: 409, headless_exit: 409, detached: 409, headless_unavailable: 409, git_failed: 409, ENOENT: 502 };
+export const backendStatus = (code) => BACKEND_ERROR_STATUS[code] ?? 502;
+export const backendError = (res, e) => json(res, backendStatus(e?.code), { error: e?.message || String(e), code: e?.code });
