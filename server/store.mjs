@@ -290,6 +290,7 @@ export class Store {
       permissionMode: init.permissionMode ?? null,
       backend: init.backend ?? null, // 'headless' when a runner owns it; null: Orca or a terminal we don't control
       pendingPermissions: [], // headless permission requests parked for the browser (Step 5): [{ id, tool, target, detail, at }]
+      asking: null,        // interactive sessions: the dialog their terminal shows (answered there): { tool, target, detail, label, at }
       transcriptPath: init.transcriptPath || null,
       orcaTerminal: this.desks[id]?.terminal || null, // Orca terminal handle (hook env or resolved) for sending prompts
       log: new RingBuffer(LOG_SIZE),
@@ -311,6 +312,7 @@ export class Store {
     if (s.ended) return;
     markEnded(s);
     s.pendingPermissions = []; // nobody can answer them now (the backend settles the parked hooks)
+    s.asking = null;
     for (const a of s.subagents.values()) this.endSubagent(a);
     this.log(s, { ev: 'SessionEnd', text: reason });
   }
@@ -446,7 +448,7 @@ export class Store {
       lastText: s.lastText, lastTextAt: s.lastTextAt, lastPrompt: s.lastPrompt,
       lastThinking: s.lastThinking, lastThinkingAt: s.lastThinkingAt, turnStartedAt: s.turnStartedAt, turnTools: s.turnTools, cost: s.cost,
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, ended: s.ended, endedAt: s.endedAt,
-      officeId: s.officeId, desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, backend: s.backend, pendingPermissions: s.pendingPermissions, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
+      officeId: s.officeId, desk: s.desk, permissionMode: s.permissionMode, hookEvents: s.hookEvents, orcaTerminal: s.orcaTerminal, backend: s.backend, pendingPermissions: s.pendingPermissions, asking: s.asking, bgTasks: s.bgTasks, awaitingShell: s.awaitingShell,
       subagents: [...s.subagents.values()].map((a) => this.serializeSubagent(a)),
       files: [...s.files.values()].reverse().slice(0, SNAPSHOT_FILES).map(({ path: p, name, edited, git, t }) => ({ path: p, name, edited, git, t })), // newest first (see bumpFile)
       log: s.log.last(logCount),
